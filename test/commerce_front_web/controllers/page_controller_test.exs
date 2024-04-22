@@ -1,5 +1,5 @@
-defmodule CommerceFrontWeb.PageControllerTest do
-  use CommerceFrontWeb.ConnCase
+defmodule BlogEngineWeb.PageControllerTest do
+  use BlogEngineWeb.ConnCase
 
   test "GET /", %{conn: conn} do
     conn = get(conn, "/")

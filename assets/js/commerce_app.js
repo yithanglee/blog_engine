@@ -17,6 +17,7 @@ export let commerceApp_ = {
   mcart_: [],
   region: "MY",
 
+
   emptyCart_(is_merchant) {
     const cartKey = is_merchant ? "mcart" : "cart";
     const firstCartCountryIdKey = is_merchant ? "first_mcart_country_id" : "first_cart_country_id";
@@ -518,7 +519,28 @@ export let commerceApp_ = {
       if (phxApp_.user.merchant == null) {
         merc = { id: "0", user_id: phxApp.user.id }
       }
+      var merchant_categorySourcex = new phoenixModel({
+        columns: [{
+          label: 'Action',
+          data: 'id'
+        }],
+        moduleName: "MerchantCategory",
+        link: "MerchantCategory",
+        buttons: [],
+        tableSelector: "#" + 'bc2c'
+      })
+      var bcs = phxApp_.populateTableData(merchant_categorySourcex, 100, () => {
 
+      })
+
+      try {
+
+        console.info(bcs.allData)
+      } catch (e) {
+
+        console.error(e)
+
+      }
 
       phxApp.createForm(merc,
         null,
@@ -530,11 +552,18 @@ export let commerceApp_ = {
               'user_id',
               'name',
               {
+                label: 'merchant_category_id',
+                alt_name: 'Business Category',
+                alt_class: "col-12",
+                selection: merchant_categorySourcex.allData
+              },
+              {
                 alt_name: 'Merchant Logo',
                 label: 'img_url',
                 upload: true
               },
               { label: 'description', binary: true, alt_class: "col-12" },
+
               {
                 label: 'commission_perc',
                 alt_name: 'Percentage Contribution',
@@ -789,7 +818,9 @@ export let commerceApp_ = {
         </div>
           `)
 
-
+      window.selectedBank = (bank) => {
+        var valu = $("input[name='WalletTopup[bank]']").val(bank)
+      }
 
       $("#new_topup").click(() => {
 
@@ -798,17 +829,28 @@ export let commerceApp_ = {
           autoClose: false,
           header: 'New Register Point Topup',
           content: `
-          <div class="row ">
-           <div class="px-4">
-           Kindly bank in to this account.
-           </div>
-          <div class="p-4 fs-5">
-            HAHO LIFE SDN. BHD.<br>
-            MBB A/C：5642 4949 7131
-          </div>
-            <form class="with_mod col-12 row p-4" module="WalletTopup" id="WalletTopup">
-            </form>
-          </div>
+            <div class="row ">
+              <div class="px-4">
+                Kindly bank in to this account.
+              </div>
+              <div class="p-4 fs-5">
+                HAHO LIFE SDN. BHD.<br>
+                <span>
+                  <div> MBB </div>
+                  <div>5642 4949 7131  <div class="btn btn-primary" onclick="phxApp.copyToClipboard('564249497131');selectedBank('MBB')">Copy</div></div>
+                </span><br>
+                <span>
+                  <div> CIMB </div>
+                  <div>8011 2277 45 <div class="btn btn-primary" onclick="phxApp.copyToClipboard('8011227745');selectedBank('CIMB')">Copy</div></div>
+                </span><br>
+                <span>
+                  <div> PUBLIC BANK </div>
+                  <div>3237 7779 07 <div class="btn btn-primary" onclick="phxApp.copyToClipboard('3237777907');selectedBank('PBB')">Copy</div></div>
+                </span><br>
+              </div>
+              <form class="with_mod col-12 row p-4" module="WalletTopup" id="WalletTopup">
+              </form>
+            </div>
         `
         })
 
@@ -829,6 +871,7 @@ export let commerceApp_ = {
               ]
             },
             { label: 'img_url', upload: true },
+            { label: 'bank', data: 'bank', hidden: true },
             'user_id'
 
           ],
@@ -2392,8 +2435,8 @@ export let commerceApp_ = {
 
         var frp = `<div class="font-sm">RP <span class="font-sm format-float">` + (v.retail_price * v.qty).toFixed(2) + `</span></div>`
         if (!showRP) {
-           frp = `<div class="font-sm">MYR <span class="font-sm format-float">` + (v.retail_price * v.qty * phxApp_.chosen_country_id_.conversion).toFixed(2) + `</span></div>`
-        
+          frp = `<div class="font-sm">MYR <span class="font-sm format-float">` + (v.retail_price * v.qty * phxApp_.chosen_country_id_.conversion).toFixed(2) + `</span></div>`
+
         }
         list.push(`
 
@@ -2401,7 +2444,7 @@ export let commerceApp_ = {
             <div style="width: 240px;" class="d-flex justify-content-between align-items-center">
               <span>` + v.name + ` <small>(x` + v.qty + `)</small></span>
               <div class="d-flex align-items-center justify-content-between gap-2">
-                `+frp+`
+                ` + frp + `
 
                 <div class="d-lg-block d-none">
                   <div class="btn btn-sm" minus-product-id="` + v.id + `"><i class="text-danger fa fa-minus"></i></div>
@@ -2681,8 +2724,8 @@ export let commerceApp_ = {
       commerceApp_.cart_.forEach((v, i) => {
         var frp = `<div class="font-sm">RP <span class="font-sm format-float">` + (v.retail_price * v.qty).toFixed(2) + `</span></div>`
         if (!showRP) {
-           frp = `<div class="font-sm">MYR <span class="font-sm format-float">` + (v.retail_price * v.qty * phxApp_.chosen_country_id_.conversion).toFixed(2) + `</span></div>`
-        
+          frp = `<div class="font-sm">MYR <span class="font-sm format-float">` + (v.retail_price * v.qty * phxApp_.chosen_country_id_.conversion).toFixed(2) + `</span></div>`
+
         }
         list.push(`
 
@@ -2690,7 +2733,7 @@ export let commerceApp_ = {
             <div style="width: 240px;" class="d-flex justify-content-between align-items-center">
               <span>` + v.name + ` <small>(x` + v.qty + `)</small></span>
               <div class="d-flex align-items-center justify-content-between gap-2">
-               `+frp+`
+               ` + frp + `
 
 
                 <div class="d-lg-block d-none">
@@ -3331,7 +3374,7 @@ export let commerceApp_ = {
                 },
                 data: {
                   sorts: [
-                    [1, "asc"]
+                    [2, "desc"]
                   ],
 
                   additional_join_statements: [{
@@ -3367,6 +3410,12 @@ export let commerceApp_ = {
                     label: 'id',
                     data: 'id'
                   },
+
+                  {
+                    label: 'product_id',
+                    data: 'product_id'
+                  },
+
                   // {
                   //   label: 'retail_price',
                   //   data: 'retail_price'
@@ -3577,6 +3626,10 @@ export let commerceApp_ = {
                 return ColumnFormater.capitalize(v)
               }).join(" ")
 
+              var short_name = wallet_name.split(" ").map((i, v) => {
+                return i.split("")[0].toUpperCase()
+              }).join("") + "P"
+
               $(v).customHtml(`
               <a href="/wallets/` + wallet.id + `" class="navi" >
 
@@ -3595,7 +3648,7 @@ export let commerceApp_ = {
                       <i class=" fa fa-dollar-sign "></i>
                     </div>
                     <div class="ps-2 ps-lg-0">
-                      <span class="text-sm text-secondary text-truncate">` + wallet_name + `</span>
+                      <span class="text-sm text-secondary text-truncate">` + wallet_name + `, <b>` + short_name + `</b></span>
                       <div class="d-flex align-items-center gap-2">
                         <div class="fs-4 format-int" style="">` + wallet.total + `</div>
                         <small>pts</small>

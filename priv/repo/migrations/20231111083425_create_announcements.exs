@@ -1,4 +1,4 @@
-defmodule CommerceFront.Repo.Migrations.CreateAnnouncements do
+defmodule BlogEngine.Repo.Migrations.CreateAnnouncements do
   use Ecto.Migration
 
   def change do

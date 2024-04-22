@@ -1,10 +1,10 @@
 defmodule Billplz do
   require Logger
-  @key Application.get_env(:commerce_front, :billplz)[:key]
-  @endpoint Application.get_env(:commerce_front, :billplz)[:endpoint]
+  @key Application.get_env(:blog_engine, :billplz)[:key]
+  @endpoint Application.get_env(:blog_engine, :billplz)[:endpoint]
   @auth [hackney: [basic_auth: {@key, ""}]]
-  @callback_url Application.get_env(:commerce_front, :billplz)[:callback]
-  @redirect_url Application.get_env(:commerce_front, :url)
+  @callback_url Application.get_env(:blog_engine, :billplz)[:callback]
+  @redirect_url Application.get_env(:blog_engine, :url)
 
   def get_bill(bill_id) do
     url = @endpoint <> "v3/bills/#{bill_id}"
@@ -150,7 +150,7 @@ defmodule Billplz do
     gateways = Map.get(res, "payment_gateways", [])
 
     for gateway <- gateways do
-      CommerceFront.Settings.create_payment_channel(gateway)
+      BlogEngine.Settings.create_payment_channel(gateway)
     end
 
     res

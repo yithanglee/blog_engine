@@ -1,4 +1,4 @@
-defmodule CommerceFront.Repo.Migrations.AddUsernameCryptedPasswordToStaffs do
+defmodule BlogEngine.Repo.Migrations.AddUsernameCryptedPasswordToStaffs do
   use Ecto.Migration
 
   def change do

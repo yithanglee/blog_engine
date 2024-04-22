@@ -1,3 +1,3 @@
-defmodule CommerceFront.Scheduler do
-   use Quantum.Scheduler, otp_app: :commerce_front
+defmodule BlogEngine.Scheduler do
+  use Quantum.Scheduler, otp_app: :blog_engine
 end

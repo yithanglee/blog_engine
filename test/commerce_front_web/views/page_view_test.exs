@@ -1,3 +1,3 @@
-defmodule CommerceFrontWeb.PageViewTest do
-  use CommerceFrontWeb.ConnCase, async: true
+defmodule BlogEngineWeb.PageViewTest do
+  use BlogEngineWeb.ConnCase, async: true
 end

@@ -47,6 +47,9 @@ export let phxApp_ = {
     var rowData = table.data()[params.index]
     return rowData
   },
+  override(j) {
+    memberApp_.override(j)
+  },
   updateUser(j) {
     memberApp_.updateUser(j)
   },
@@ -166,7 +169,7 @@ export let phxApp_ = {
         return z[0] == current_pattern[0]
       })
     this.hide()
-    memberApp_.restoreUser();
+    // memberApp_.restoreUser();
     if (match_2.length > 0) {
       var params = {}
       match_2.forEach((rroute, i) => {
@@ -181,15 +184,15 @@ export let phxApp_ = {
       if (match_2[0].public) {
 
       } else {
-        await memberApp_.restoreUser()
-        console.log("resting?")
+        // await memberApp_.restoreUser()
+        // console.log("resting?")
 
-        if (memberApp_.user != null) {
+        // if (memberApp_.user != null) {
 
-        } else {
-          // location = "/logout"
-          phxApp_.navigateTo("/logout")
-        }
+        // } else {
+        //   // location = "/logout"
+        //   phxApp_.navigateTo("/logout")
+        // }
       }
 
       window.pageParams = params
@@ -526,6 +529,7 @@ export let phxApp_ = {
         }
 
       }).fail(function(e) {
+alert("!!!")
         if (e.status == 403) {
           memberApp_.logout()
         }
@@ -645,7 +649,7 @@ export let phxApp_ = {
       async: false,
       method: "post",
       headers: {
-        '_commerce_front_key': memberApp_.user.token,
+        '_blog_engine_key': memberApp_.user.token,
         "Authorization": "Basic " + (phxApp_.user != null ? phxApp_.user.token : null),
         'X-CSRF-Token': csrfToken
       },
@@ -658,6 +662,7 @@ export let phxApp_ = {
       }
       res = j
     }).fail(function(e) {
+      alert("!!")
       if (e.status == 403) {
         memberApp_.logout()
       }
@@ -1130,6 +1135,8 @@ export let phxApp_ = {
                       </div>
                     </div>`
       }
+
+     
       if (qv.upload) {
 
 
@@ -1143,6 +1150,7 @@ export let phxApp_ = {
                       </div>
                     </div>`
       }
+
       if (qv.editor) {
         input2 =
           `<div class="` + alt_class + `">
@@ -1645,6 +1653,7 @@ export let phxApp_ = {
               })
 
               .fail(function(e) {
+                    alert("!")
                 if (e.status == 403) {
                   memberApp_.logout()
                 }
@@ -1727,6 +1736,7 @@ export let phxApp_ = {
 
 
       }).fail(function(e) {
+        alert("!!!")
         if (e.status == 403) {
           memberApp_.logout()
         }
@@ -2123,6 +2133,17 @@ export let phxApp_ = {
       });
     });
   },
+    copyToClipboard(text) {
+        navigator.clipboard.writeText(text)
+          .then(() => {
+            console.log('Text copied to clipboard:', text);
+            alert('Text copied to clipboard!');
+          })
+          .catch(err => {
+            console.error('Could not copy text: ', err);
+            alert('Could not copy text: ' + err);
+          });
+      },
   populateTableData(dataSourcee, length, onCompleteFn) {
     this.getTableData(dataSourcee, length, onCompleteFn)
   },
@@ -2237,6 +2258,8 @@ export let phxApp_ = {
       var td = document.createElement("td");
       ftr.append(td);
     });
+
+    console.info(custSorts)
 
     $(dataSource.tableSelector).find("thead").append(tr);
     $(dataSource.tableSelector).find("tfoot").html(ftr);

@@ -1,4 +1,4 @@
-# CommerceFront
+# BlogEngine
 
 To start your Phoenix server:
 
@@ -336,6 +336,16 @@ when  update rp remarks, ensure the is_approved mark is checked [v]
 
 todo
 [v] merchant mall add merchant label
-[] modify the customer order into invoice
-[] update the merchant application TnC
+[v] modify the customer order into invoice
+[v] update the merchant application TnC
 [v] add commission perc
+
+----
+
+todo 22/feb
+
+[v] override login
+[v] U2,U3 rewward list view by U1
+[v] when pay reward, pay to U1
+admin sales filter by country
+merchant product filter by business category

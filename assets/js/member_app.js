@@ -19,6 +19,19 @@ export let memberApp_ = {
       }
     }
   },
+  override(j) {
+    // supposing j is the temp token 
+
+
+    phxApp_.form($(j).closest("form"), "override", (j) => {
+      memberApp_.user = j
+      memberApp_.save(j)
+      $("[aria-label='login']").addClass("d-none")
+      $("[aria-label='logout']").removeClass("d-none")
+      // phxApp_.navigateTo("/home")
+      window.location = "/home"
+    })
+  },
   extendUser() {
     phxApp_.api("extend_user", { token: this.user.token }, null, (j) => {
 
@@ -195,12 +208,13 @@ export let memberApp_ = {
     })
   },
   logout() {
+    alert("!!!")
     console.log("logging out...")
     localStorage.removeItem("user")
     $("[aria-label='login']").removeClass("d-none")
     $("[aria-label='logout']").addClass("d-none")
     phxApp_.notify("Log out!")
-    document.cookie = "_commerce_front_key=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+    document.cookie = "_blog_engine_key=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
     setTimeout(() => {
       location = "/login"
     }, 1000)

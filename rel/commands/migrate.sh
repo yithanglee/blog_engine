@@ -1,2 +1,2 @@
 #!/bin/sh
-      $RELEASE_ROOT_DIR/bin/commerce_front command Elixir.CommerceFront.ReleaseTasks seed
+      $RELEASE_ROOT_DIR/bin/blog_engine command Elixir.BlogEngine.ReleaseTasks seed

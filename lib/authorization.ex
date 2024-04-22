@@ -1,5 +1,5 @@
-defmodule CommerceFront.Authorization do
-  use Phoenix.Controller, namespace: CommerceFrontWeb
+defmodule BlogEngine.Authorization do
+  use Phoenix.Controller, namespace: BlogEngineWeb
   import Plug.Conn
   require IEx
 
@@ -42,8 +42,8 @@ defmodule CommerceFront.Authorization do
   end
 end
 
-defmodule CommerceFront.ApiAuthorization do
-  use Phoenix.Controller, namespace: CommerceFrontWeb
+defmodule BlogEngine.ApiAuthorization do
+  use Phoenix.Controller, namespace: BlogEngineWeb
   import Plug.Conn
   require IEx
 
@@ -59,6 +59,7 @@ defmodule CommerceFront.ApiAuthorization do
       cond do
         conn.params["scope"] in [
           "login",
+          "override",
           "sign_in",
           "update_customer",
           "food_payment",
@@ -75,9 +76,9 @@ defmodule CommerceFront.ApiAuthorization do
           with auth_token <- Plug.Conn.get_req_header(conn, "authorization") |> List.first(),
                true <- auth_token != nil,
                token <- auth_token |> String.split("Basic ") |> List.last(),
-               t <- CommerceFront.Settings.decode_token(token) |> IO.inspect(),
+               t <- BlogEngine.Settings.decode_token(token) |> IO.inspect(),
                admin_t <-
-                 CommerceFront.Settings.decode_admin_token(token)
+                 BlogEngine.Settings.decode_admin_token(token)
                  |> IO.inspect() do
             if t != nil do
               conn

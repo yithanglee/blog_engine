@@ -1,4 +1,4 @@
-defmodule CommerceFront.Repo.Migrations.CreateRoles do
+defmodule BlogEngine.Repo.Migrations.CreateRoles do
   use Ecto.Migration
 
   def change do

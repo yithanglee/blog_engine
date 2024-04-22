@@ -31,13 +31,13 @@ environment :dev do
   # dev mode.
   set dev_mode: true
   set include_erts: false
-  set cookie: :"i$nl]b8<s:EfF|>SzwU6yWRN4Q_B$K64iPJJOyc*zycZ[qi;B*y18>/*|n*udFRB"
+  set cookie: :"?:<Oic{s|9WG(nCgJ=jUr&my1wssLiSqX%bC~05!Nyu`[DS9eMQgnVL&{fY4)P7k"
 end
 
 environment :prod do
-  set include_erts: true
+  set include_erts: false
   set include_src: false
-  set cookie: :"1afrb:=FY|R^quo`R~5fRJTW/w$0pw_HGDxXcH:4:EVL*(K~UbjuWg$QwI.kD_om"
+  set cookie: :"73yQU(<;MiepzU[D$gfqi|qguT6ISDPRn`BIXBEj>%c)QXsB/NkV$?w1(zALl:K|"
   set vm_args: "rel/vm.args"
 end
 
@@ -46,8 +46,8 @@ end
 # when running `mix distillery.release`, the first release in the file
 # will be used by default
 
-release :commerce_front do
-  set version: current_version(:commerce_front)
+release :blog_engine do
+  set version: current_version(:blog_engine)
   set applications: [
     :runtime_tools
 ]

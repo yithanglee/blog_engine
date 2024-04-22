@@ -6,7 +6,7 @@ use Mix.Config
 # The watchers configuration can be used to run external
 # watchers to your application. For example, we use it
 # with webpack to recompile .js and .css sources.
-config :commerce_front, CommerceFrontWeb.Endpoint,
+config :blog_engine, BlogEngineWeb.Endpoint,
   http: [port: 4000],
   https: [
     port: 4001,
@@ -44,13 +44,13 @@ config :commerce_front, CommerceFrontWeb.Endpoint,
 # different ports.
 
 # Watch static and templates for browser reloading.
-config :commerce_front, CommerceFrontWeb.Endpoint,
+config :blog_engine, BlogEngineWeb.Endpoint,
   live_reload: [
     patterns: [
       ~r"priv/static/.*(html|js|css|png|jpeg|jpg|gif|svg)$",
-      ~r"lib/commerce_front/.*(ex)$",
-      ~r"lib/commerce_front_web/.*(ex)$",
-      ~r"lib/commerce_front_web/templates/.*(eex)$"
+      ~r"lib/blog_engine/.*(ex)$",
+      ~r"lib/blog_engine_web/.*(ex)$",
+      ~r"lib/blog_engine_web/templates/.*(eex)$"
     ]
   ]
 
@@ -64,11 +64,11 @@ config :phoenix, :stacktrace_depth, 20
 # Initialize plugs at runtime for faster development compilation
 config :phoenix, :plug_init_mode, :runtime
 
-config :commerce_front, url: System.get_env("ENDPOINT")
+config :blog_engine, url: System.get_env("ENDPOINT")
 
-config :commerce_front, :billplz,
+config :blog_engine, :billplz,
   key: System.get_env("BILLPLZ_API_KEY"),
   endpoint: System.get_env("BILLPLZ_API_ENDPOINT"),
   callback: System.get_env("BILLPLZ_API_CALLBACK_URL")
 
-config :commerce_front, CommerceFront.Mailer, adapter: Bamboo.LocalAdapter
+config :blog_engine, BlogEngine.Mailer, adapter: Bamboo.LocalAdapter

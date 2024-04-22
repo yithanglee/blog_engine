@@ -7,21 +7,21 @@
 # General application configuration
 use Mix.Config
 
-config :commerce_front,
-  ecto_repos: [CommerceFront.Repo]
+config :blog_engine,
+  ecto_repos: [BlogEngine.Repo]
 
 # Configures the endpoint
-config :commerce_front, CommerceFrontWeb.Endpoint,
+config :blog_engine, BlogEngineWeb.Endpoint,
   url: [host: "localhost"],
   secret_key_base: "4vvlxoQtn0Dd2irSRa4d8QUAmkBWr+SaF8x3MbsR6CXEcQga/Vy5uvh01T9YlL89",
-  render_errors: [view: CommerceFrontWeb.ErrorView, accepts: ~w(html json), layout: false],
-  pubsub_server: CommerceFront.PubSub,
+  render_errors: [view: BlogEngineWeb.ErrorView, accepts: ~w(html json), layout: false],
+  pubsub_server: BlogEngine.PubSub,
   live_view: [signing_salt: "eHS1OdsC"]
 
-config :commerce_front, CommerceFront.Repo,
+config :blog_engine, BlogEngine.Repo,
   username: "postgres",
   password: "postgres",
-  database: "commerce_front_dev",
+  database: "blog_engine_dev",
   hostname: "localhost",
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
@@ -35,10 +35,10 @@ config :logger, :console,
 config :phoenix, :json_library, Jason
 
 config :blue_potion,
-  otp_app: "CommerceFront",
-  repo: CommerceFront.Repo,
+  otp_app: "BlogEngine",
+  repo: BlogEngine.Repo,
   contexts: ["Settings"],
-  project: %{name: "CommerceFront", alias_name: "commerce_front", vsn: "0.1.0"},
+  project: %{name: "BlogEngine", alias_name: "blog_engine", vsn: "0.1.0"},
   server: %{
     url: "139.162.60.209",
     db_url: "127.0.0.1",
@@ -54,16 +54,7 @@ config :blue_potion,
     domain_name: "localhost"
   }
 
-config :commerce_front, CommerceFront.Scheduler,
-  jobs: [
-    {"05 0 * * 1", {CommerceFront, :daily_task, [Date.utc_today() |> Date.add(-1)]}},
-    {"05 0 * * 2", {CommerceFront, :daily_task, [Date.utc_today() |> Date.add(-1)]}},
-    {"05 0 * * 3", {CommerceFront, :daily_task, [Date.utc_today() |> Date.add(-1)]}},
-    {"05 0 * * 4", {CommerceFront, :daily_task, [Date.utc_today() |> Date.add(-1)]}},
-    {"05 0 * * 5", {CommerceFront, :daily_task, [Date.utc_today() |> Date.add(-1)]}},
-    {"05 0 * * 6", {CommerceFront, :daily_task, [Date.utc_today() |> Date.add(-1)]}},
-    {"05 0 * * 0", {CommerceFront, :daily_task, [Date.utc_today() |> Date.add(-1)]}}
-  ]
+config :blog_engine, BlogEngine.Scheduler, jobs: []
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

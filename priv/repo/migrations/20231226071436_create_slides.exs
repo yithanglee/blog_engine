@@ -1,4 +1,4 @@
-defmodule CommerceFront.Repo.Migrations.CreateSlides do
+defmodule BlogEngine.Repo.Migrations.CreateSlides do
   use Ecto.Migration
 
   def change do

@@ -1,4 +1,4 @@
-defmodule CommerceFrontWeb.ConnCase do
+defmodule BlogEngineWeb.ConnCase do
   @moduledoc """
   This module defines the test case to be used by
   tests that require setting up a connection.
@@ -11,7 +11,7 @@ defmodule CommerceFrontWeb.ConnCase do
   we enable the SQL sandbox, so changes done to the database
   are reverted at the end of every test. If you are using
   PostgreSQL, you can even run database tests asynchronously
-  by setting `use CommerceFrontWeb.ConnCase, async: true`, although
+  by setting `use BlogEngineWeb.ConnCase, async: true`, although
   this option is not recommended for other databases.
   """
 
@@ -22,12 +22,12 @@ defmodule CommerceFrontWeb.ConnCase do
       # Import conveniences for testing with connections
       import Plug.Conn
       import Phoenix.ConnTest
-      import CommerceFrontWeb.ConnCase
+      import BlogEngineWeb.ConnCase
 
-      alias CommerceFrontWeb.Router.Helpers, as: Routes
+      alias BlogEngineWeb.Router.Helpers, as: Routes
 
       # The default endpoint for testing
-      @endpoint CommerceFrontWeb.Endpoint
+      @endpoint BlogEngineWeb.Endpoint
     end
   end
 

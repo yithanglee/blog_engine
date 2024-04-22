@@ -1,8 +1,8 @@
 #!/bin/sh
-            cd /commerce_front
-            echo  | sudo -S tar xfz commerce_front.tar.gz
-            sudo mv /commerce_front/commerce_front.tar.gz /commerce_front/releases/0.1.0/
-            sudo /commerce_front/bin/commerce_front stop
-            sudo /commerce_front/bin/commerce_front migrate
-            sudo /commerce_front/bin/commerce_front start
+            cd /blog_engine
+            echo  | sudo -S tar xfz blog_engine.tar.gz
+            sudo mv /blog_engine/blog_engine.tar.gz /blog_engine/releases/0.1.0/
+            sudo /blog_engine/bin/blog_engine stop
+            sudo /blog_engine/bin/blog_engine migrate
+            sudo /blog_engine/bin/blog_engine start
             

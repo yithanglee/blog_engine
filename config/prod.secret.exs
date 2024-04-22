@@ -11,7 +11,7 @@ database_url =
     For example: ecto://USER:PASS@HOST/DATABASE
     """
 
-config :commerce_front, CommerceFront.Repo,
+config :blog_engine, BlogEngine.Repo,
   # ssl: true,
   url: database_url,
   pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10")
@@ -23,7 +23,7 @@ secret_key_base =
     You can generate one by calling: mix phx.gen.secret
     """
 
-config :commerce_front, CommerceFrontWeb.Endpoint,
+config :blog_engine, BlogEngineWeb.Endpoint,
   http: [
     port: String.to_integer(System.get_env("PORT") || "4000"),
     transport_options: [socket_opts: [:inet6]]
@@ -35,20 +35,20 @@ config :commerce_front, CommerceFrontWeb.Endpoint,
 # If you are doing OTP releases, you need to instruct Phoenix
 # to start each relevant endpoint:
 #
-#     config :commerce_front, CommerceFrontWeb.Endpoint, server: true
+#     config :blog_engine, BlogEngineWeb.Endpoint, server: true
 #
 # Then you can assemble a release by calling `mix release`.
 # See `mix help release` for more information.
-config :commerce_front, CommerceFrontWeb.Endpoint, server: true
+config :blog_engine, BlogEngineWeb.Endpoint, server: true
 
-config :commerce_front, url: System.get_env("ENDPOINT_PROD")
+config :blog_engine, url: System.get_env("ENDPOINT_PROD")
 
-config :commerce_front, :billplz,
+config :blog_engine, :billplz,
   key: System.get_env("BILLPLZ_API_KEY_PROD"),
   endpoint: System.get_env("BILLPLZ_API_ENDPOINT_PROD"),
   callback: System.get_env("BILLPLZ_API_CALLBACK_URL_PROD")
 
-config :commerce_front, CommerceFront.Mailer,
+config :blog_engine, BlogEngine.Mailer,
   adapter: Bamboo.SMTPAdapter,
   server: "smtp.zoho.com",
   hostname: "haho2u.com",

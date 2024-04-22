@@ -33,12 +33,12 @@ if ('serviceWorker' in navigator && useSw) {
       console.error('Service Worker registration failed:', error);
     });
 }
-var langPrefix = "v2";
+var langPrefix = "en";
 window.translationRes = "";
 
 
 function evalCountry(countryName) {
-  var prefix = "v2"
+  var prefix = "en"
 
   if (countryName == "Thailand") {
     prefix = "th"
@@ -58,7 +58,8 @@ try {
   if (localStorage.region != null) {
     langPrefix = evalCountry(localStorage.region)
   }
-  translationRes = phxApp_.api("translation", { lang: langPrefix });
+  // translationRes = phxApp_.api("translation", { lang: langPrefix });
+  translationRes = {}
 } catch (error) {
   console.error("Error fetching translation:", error);
 }
@@ -69,7 +70,7 @@ $.fn.extend({
     var v2 = translation_map.reduce((acc, key) => {
 
       var regex = new RegExp(key, "g");
-    
+
       return acc.replace(regex, translationRes[key]);
     }, newHtml);
 
@@ -135,42 +136,10 @@ window.addEventListener(
 );
 
 const route_list = [
- { html: "merchant_withdrawal.html", title: "Merchant Withdrawal ", route: "/merchant_withdrawals"},
- 
- { html: "merchant_application.html", title: "Merchant Application ", route: "/merchant_application"},
- { html: "merchant_profile.html", title: "Merchant Profile ", route: "/merchant_profile"},
- { html: "merchant_checkout.html", title: "Merchant Checkout ", route: "/merchant_checkout"},
- { html: "merchant_purchases.html", title: "Merchant Purchases", route: "/merchant_purchases"},
- { html: "merchant_sales.html", title: "Merchant Sales", route: "/merchant_sales"},
- { html: "merchant_mall.html", title: "Merchant Mall", route: "/merchant_mall"},
-  { html: "merchant_products.html", title: "Merchant Products", route: "/merchant_products"},
-   { html: "mproduct.html", title: "Merchant Product", route: "/mproducts/:id/:name" },
-
-  { html: "refund_policy.html", title: "Refund Policy ", route: "/refund_policy", public: true, skipNav: true },
-  { html: "terms_condition.html", title: "Terms Condition ", route: "/terms_condition", public: true, skipNav: true },
-  { html: "code_register.html", title: "Register ", route: "/code_register/:share_code", public: true, skipNav: true },
-  { html: "register_wallet.html", title: "Register Wallet ", route: "/register_wallet" },
-  { html: "bonus_wallet.html", title: "Bonus Wallet ", route: "/bonus_wallet" },
-  { html: "new_topup.html", title: "Register Point Topup ", route: "/topup_register_point" },
-  { html: "upgrade.html", title: "Upgrade ", route: "/upgrade" },
-  { html: "redeem.html", title: "Redeem ", route: "/redeem" },
-  { html: "withdrawal.html", title: "Withdrawal ", route: "/withdrawals" },
-  { html: "reward_details.html", title: "Reward Details ", route: "/reward_details/:name/:month/:year" },
-  { html: "sales_detail.html", title: "Sales Details", route: "/sales/:id" },
-  { html: "sales.html", title: "Sales History", route: "/sales" },
-  { html: "wallet_transaction.html", title: "Transactions ", route: "/wallets/:id" },
-  { html: "product.html", title: "Product", route: "/products/:id/:name" },
-  { html: "register.html", title: "Register", route: "/register" },
-  { html: "logout.html", title: "Logout", route: "/logout", public: true },
+  { html: "devices.html", title: "Devices", route: "/devices", public: true },
   { html: "thank_you.html", title: "Login", route: "/thank_you", public: true },
-  { html: "login.html", title: "Login", route: "/login", public: true },
-  { html: "profile.html", title: "Profile", route: "/profile" },
-  { html: "placement.html", title: "Placement", route: "/placement" },
-  { html: "placement_full.html", title: "Placement(Full)", route: "/placement_full" },
-  { html: "referal.html", title: "Referal", route: "/referal" },
-  { html: "gs_summary.html", title: "Group Sales", route: "/group_sales" },
-]
 
+]
 route_list.forEach((v, i) => {
   phxApp_.route_names.push(v)
 })

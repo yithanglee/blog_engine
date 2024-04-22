@@ -1,4 +1,4 @@
-defmodule CommerceFront.Repo.Migrations.CreateAppRoutes do
+defmodule BlogEngine.Repo.Migrations.CreateAppRoutes do
   use Ecto.Migration
 
   def change do

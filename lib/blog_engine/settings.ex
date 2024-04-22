@@ -1,0 +1,947 @@
+defmodule BlogEngine.Settings do
+  @moduledoc """
+  The Settings context.
+  """
+  require Logger
+  # import Mogrify
+  import Ecto.Query, warn: false
+  alias BlogEngine.Repo
+  require IEx
+  alias Ecto.Multi
+
+  alias BlogEngine.Settings.Slide
+
+  def list_slides(is_show) do
+    Repo.all(from(s in Slide, where: s.is_show == ^is_show))
+  end
+
+  def get_slide!(id) do
+    Repo.get!(Slide, id)
+  end
+
+  def append_bool_key(params, bool_key) do
+    if bool_key in Map.keys(params) do
+      params |> Map.put(bool_key, Map.get(params, bool_key) == "on")
+    else
+      params
+    end
+  end
+
+  def create_slide(params \\ %{}) do
+    bool_key = "is_show"
+    params = append_bool_key(params, bool_key)
+
+    Slide.changeset(%Slide{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_slide(model, params) do
+    bool_key = "is_show"
+    params = append_bool_key(params, bool_key)
+
+    Slide.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_slide(%Slide{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.SessionUser
+
+  def get_member_by_cookie(cookie) do
+    Repo.all(from(s in SessionUser, where: s.cookie == ^cookie))
+    |> List.first()
+  end
+
+  def get_cookie_user_by_cookie(cookie) do
+    Repo.all(
+      from(s in SessionUser, where: s.cookie == ^cookie, preload: [user: [role: :app_routes]])
+    )
+    |> List.first()
+  end
+
+  def list_session_users() do
+    Repo.all(SessionUser)
+  end
+
+  def get_session_user!(id) do
+    Repo.get!(SessionUser, id)
+  end
+
+  def create_session_user(params \\ %{}) do
+    SessionUser.changeset(%SessionUser{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_session_user(model, params) do
+    SessionUser.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_session_user(%SessionUser{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.AppRoute
+
+  def list_app_routes() do
+    Repo.all(AppRoute)
+  end
+
+  def get_app_route!(id) do
+    Repo.get!(AppRoute, id)
+  end
+
+  def create_app_route(params \\ %{}) do
+    bool_key = "can_get"
+    params = append_bool_key(params, bool_key)
+
+    bool_key = "can_post"
+    params = append_bool_key(params, bool_key)
+
+    AppRoute.changeset(%AppRoute{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_app_route(model, params) do
+    bool_key = "can_get"
+    params = append_bool_key(params, bool_key)
+
+    bool_key = "can_post"
+    params = append_bool_key(params, bool_key)
+    AppRoute.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_app_route(%AppRoute{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.Role
+
+  def list_roles() do
+    Repo.all(Role)
+  end
+
+  def get_role!(id) do
+    Repo.get!(Role, id) |> Repo.preload(:app_routes)
+  end
+
+  def create_role(params \\ %{}) do
+    Role.changeset(%Role{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_role(model, params) do
+    Role.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_role(%Role{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.RoleAppRoute
+
+  def list_role_app_routes() do
+    Repo.all(RoleAppRoute)
+  end
+
+  def get_role_app_route!(id) do
+    Repo.get!(RoleAppRoute, id)
+  end
+
+  def create_role_app_route(params \\ %{}) do
+    sample = %{"AppRoute" => %{"1" => %{"1" => "on", "2" => "on"}}, "id" => "0"}
+
+    role_id = Map.keys(params["AppRoute"]) |> List.first()
+
+    items = params["AppRoute"][role_id] |> Map.keys()
+    Repo.delete_all(from(rap in RoleAppRoute, where: rap.role_id == ^role_id))
+
+    for item <- items do
+      params = %{"role_id" => role_id, "app_route_id" => item}
+      RoleAppRoute.changeset(%RoleAppRoute{}, params) |> Repo.insert() |> IO.inspect()
+    end
+
+    {:ok, %RoleAppRoute{id: 0}}
+  end
+
+  def update_role_app_route(model, params) do
+    RoleAppRoute.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_role_app_route(%RoleAppRoute{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.Staff
+
+  def list_staffs() do
+    Repo.all(Staff)
+  end
+
+  def get_staff!(id) do
+    Repo.get!(Staff, id)
+  end
+
+  def create_staff(params \\ %{}) do
+    Staff.changeset(%Staff{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_staff(model, attrs) do
+    attrs =
+      with true <- "password" in Map.keys(attrs),
+           true <- attrs["password"] != "" do
+        crypted_password =
+          :crypto.hash(:sha512, attrs["password"]) |> Base.encode16() |> String.downcase()
+
+        attrs |> Map.put("crypted_password", crypted_password)
+      else
+        _ ->
+          attrs
+      end
+
+    Staff.changeset(model, attrs) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_staff(%Staff{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.Announcement
+
+  def list_announcements() do
+    Repo.all(Announcement)
+  end
+
+  def get_announcement!(id) do
+    Repo.get!(Announcement, id)
+  end
+
+  def create_announcement(params \\ %{}) do
+    Announcement.changeset(%Announcement{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_announcement(model, params) do
+    Announcement.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_announcement(%Announcement{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.User
+
+  def member_token(id) do
+    Repo.delete_all(from(su in BlogEngine.Settings.SessionUser, where: su.user_id == ^id))
+
+    Phoenix.Token.sign(
+      BlogEngineWeb.Endpoint,
+      "member_signature",
+      %{id: id}
+    )
+  end
+
+  def decode_admin_token(token) do
+    case Phoenix.Token.verify(BlogEngineWeb.Endpoint, "admin_signature", token) do
+      {:ok, map} ->
+        map
+
+      {:error, _reason} ->
+        nil
+    end
+  end
+
+  def decode_token(token) do
+    case Phoenix.Token.verify(BlogEngineWeb.Endpoint, "member_signature", token) do
+      {:ok, map} ->
+        map
+
+      {:error, _reason} ->
+        nil
+    end
+  end
+
+  def override_user(params) do
+    user =
+      Repo.all(from(u in User, where: u.username == ^params["username"]))
+      |> List.first()
+
+    with true <- user != nil,
+         crypted_password <-
+           :crypto.hash(:sha512, params["password"]) |> Base.encode16() |> String.downcase(),
+         true <- crypted_password == user.temp_pin do
+      {:ok, user} = User.changeset(user, %{temp_pin: nil}) |> Repo.update()
+      user = user |> Repo.preload([:merchant, :rank, :stockist_users])
+      {:ok, user}
+    else
+      _ ->
+        {:error}
+    end
+  end
+
+  def auth_user(params) do
+    res =
+      Repo.all(
+        from(u in User,
+          where: u.username == ^params["username"],
+          preload: [:merchant, :rank, :stockist_users]
+        )
+      )
+
+    user = res |> List.first()
+
+    with true <- user != nil,
+         crypted_password <-
+           :crypto.hash(:sha512, params["password"]) |> Base.encode16() |> String.downcase(),
+         true <- crypted_password == user.crypted_password do
+      {:ok, user}
+    else
+      _ ->
+        {:error, res}
+    end
+  end
+
+  def list_users() do
+    Repo.all(User)
+  end
+
+  def get_user!(id) do
+    Repo.all(from(u in User, where: u.id == ^id, preload: [:rank, :merchant])) |> List.first()
+  end
+
+  def create_user(attrs \\ %{}) do
+    attrs =
+      if "password" in Map.keys(attrs) do
+        crypted_password =
+          :crypto.hash(:sha512, attrs["password"]) |> Base.encode16() |> String.downcase()
+
+        attrs |> Map.put("crypted_password", crypted_password)
+      else
+        attrs
+      end
+
+    User.changeset(%User{}, attrs) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_user(model, attrs) do
+    attrs =
+      with true <- "password" in Map.keys(attrs),
+           true <- attrs["password"] != "" do
+        crypted_password =
+          :crypto.hash(:sha512, attrs["password"]) |> Base.encode16() |> String.downcase()
+
+        attrs |> Map.put("crypted_password", crypted_password)
+      else
+        _ ->
+          attrs
+      end
+
+    attrs =
+      with true <- "temp_pin" in Map.keys(attrs),
+           true <- attrs["temp_pin"] != "" do
+        crypted_password =
+          :crypto.hash(:sha512, attrs["temp_pin"]) |> Base.encode16() |> String.downcase()
+
+        attrs |> Map.put("temp_pin", crypted_password)
+      else
+        _ ->
+          attrs
+      end
+
+    attrs =
+      if "is_stockist" in Map.keys(attrs) do
+        attrs |> Map.put("is_stockist", attrs["is_stockist"] == "on")
+      else
+        attrs
+      end
+
+    attrs =
+      if "rank_id" in Map.keys(attrs) do
+        attrs |> Map.put("rank_name", BlogEngine.Settings.get_rank!(attrs["rank_id"]).name)
+      else
+        attrs
+      end
+
+    cg =
+      Multi.new()
+      |> Multi.run(:user, fn _repo, %{} ->
+        User.changeset(model, attrs) |> Repo.update()
+      end)
+      |> Multi.run(:placements, fn _repo, %{user: user} ->
+        # user has many placements if its a stockist
+
+        if user.is_stockist do
+          stockist_users = user |> Repo.preload(:stockist_users) |> Map.get(:stockist_users)
+
+          for stockist_user <- stockist_users do
+            [username, position] = stockist_user.username |> String.split("-") |> IO.inspect()
+
+            {:ok, u} =
+              User.changeset(
+                stockist_user,
+                attrs
+                |> Map.take([
+                  "fullname",
+                  "phone",
+                  "email",
+                  "country_id",
+                  "bank_account_holder",
+                  "bank_account_no",
+                  "bank_name"
+                ])
+                |> Map.put("username", attrs["username"] <> "-" <> position)
+              )
+              |> Repo.update()
+              |> IO.inspect()
+          end
+        else
+        end
+
+        {:ok, nil}
+      end)
+      |> Repo.transaction()
+      |> IO.inspect()
+
+    # |> Multi.run(:merchant, fn _repo, %{user: user} ->
+    #   if user.merchant != nil do
+    #     Merchant.changeset(user.merchant, %{name: attrs["fullname"]}) |> Repo.update()
+    #   else
+    #     Merchant.changeset(%Merchant{}, %{name: attrs["fullname"], user_id: user.id}) |> Repo.insert()
+    #   end
+    # end)
+
+    # User.changeset(model, attrs) |> Repo.update() |> IO.inspect()
+
+    case cg do
+      {:ok, multi_res} ->
+        u =
+          multi_res
+          |> Map.get(:user)
+          |> Repo.preload([:merchant, :rank])
+          |> Map.put(
+            :token,
+            BlogEngine.Settings.member_token(multi_res |> Map.get(:user) |> Map.get(:id))
+          )
+
+        {:ok, u}
+
+      {:error, cg} ->
+        {:error, cg}
+    end
+  end
+
+  def delete_user(%User{} = model) do
+    Repo.delete(model)
+  end
+
+  def get_user_by_username(username) do
+    Repo.get_by(User, username: username)
+  end
+
+  def check_staff_password(params) do
+    users =
+      Repo.all(
+        from(u in Staff, where: u.username == ^params["username"], preload: [role: :app_routes])
+      )
+      |> IO.inspect()
+
+    if users != [] do
+      user = List.first(users)
+
+      crypted_password =
+        :crypto.hash(:sha512, params["password"] |> IO.inspect())
+        |> Base.encode16()
+        |> String.downcase()
+        |> IO.inspect()
+
+      {crypted_password == user.crypted_password, user} |> IO.inspect()
+    else
+      {false, nil}
+    end
+  end
+
+  def get_admin_staff() do
+    check = Repo.all(from(r in Role, where: r.name == "Owner")) |> IO.inspect()
+
+    if check == [] do
+      {:ok, role} = create_role(%{name: "Owner", desc: "own and manage the company "})
+      role
+    else
+      List.first(check)
+    end
+  end
+
+  def menu_list() do
+    %{
+      "0" => %{
+        "children" => %{
+          "0" => %{
+            "icon" => "camera-foto-solid",
+            "path" => "/admin/staff",
+            "title" => "Staff"
+          },
+          "1" => %{
+            "icon" => "camera-foto-solid",
+            "path" => "/admin/role",
+            "title" => "Role"
+          },
+          "2" => %{
+            "icon" => "camera-foto-solid",
+            "path" => "/admin/app_route",
+            "title" => "Route"
+          },
+          "3" => %{
+            "icon" => "camera-foto-solid",
+            "path" => "/merchants/categories",
+            "title" => "Merchant Business Categories"
+          }
+        },
+        "icon" => "",
+        "path" => "#",
+        "title" => "Admin"
+      },
+      "1" => %{
+        "children" => %{
+          "0" => %{
+            "icon" => "camera-foto-solid",
+            "path" => "/geo/countries",
+            "title" => "Country"
+          },
+          "1" => %{
+            "icon" => "camera-foto-solid",
+            "path" => "/geo/states",
+            "title" => "States"
+          },
+          "2" => %{
+            "icon" => "camera-foto-solid",
+            "path" => "/geo/pick_up_points",
+            "title" => "Pick Up Points"
+          }
+        },
+        "icon" => "",
+        "path" => "#",
+        "title" => "Geo"
+      },
+      "10" => %{
+        "children" => %{
+          "0" => %{"icon" => "book-solid", "path" => "/users", "title" => "Users"},
+          "1" => %{
+            "icon" => "book-solid",
+            "path" => "/users/placements",
+            "title" => "Placements"
+          }
+        },
+        "icon" => "",
+        "path" => "#",
+        "title" => "Users"
+      },
+      "11" => %{"icon" => "book-solid", "path" => "/ranks", "title" => "Rank"},
+      "12" => %{
+        "children" => %{
+          "0" => %{
+            "icon" => "camera-foto-solid",
+            "path" => "/ewallets/withdrawal_batches",
+            "title" => "Withdrawal"
+          },
+          "1" => %{
+            "icon" => "camera-foto-solid",
+            "path" => "/ewallets/merchant_withdrawals",
+            "title" => "Merchant Withdrawal"
+          },
+          "2" => %{
+            "icon" => "book-solid",
+            "path" => "/ewallets",
+            "title" => "Ewallets"
+          },
+          "3" => %{
+            "icon" => "camera-foto-solid",
+            "path" => "/ewallets/transfers",
+            "title" => "Transfers"
+          },
+          "4" => %{
+            "icon" => "camera-foto-solid",
+            "path" => "/ewallets/register_points",
+            "title" => "Register Points"
+          }
+        },
+        "icon" => "",
+        "path" => "#",
+        "title" => "Ewallets"
+      },
+      "2" => %{
+        "icon" => "book-solid",
+        "path" => "/announcements",
+        "title" => "Announcements"
+      },
+      "3" => %{"icon" => "book-solid", "path" => "/slides", "title" => "Slides"},
+      "4" => %{
+        "children" => %{
+          "0" => %{
+            "icon" => "camera-foto-solid",
+            "path" => "/rewards/summary",
+            "title" => "Commission Summary"
+          },
+          "1" => %{
+            "icon" => "camera-foto-solid",
+            "path" => "/rewards/details",
+            "title" => "Commission Details"
+          },
+          "2" => %{
+            "icon" => "camera-foto-solid",
+            "path" => "/rewards",
+            "title" => "All Commission"
+          },
+          "3" => %{
+            "icon" => "camera-foto-solid",
+            "path" => "/rewards/royalty_users",
+            "title" => "Royalty Users"
+          }
+        },
+        "icon" => "",
+        "path" => "#",
+        "title" => "Commission"
+      },
+      "5" => %{
+        "children" => %{
+          "0" => %{
+            "icon" => "book-solid",
+            "path" => "/referral_gs_summary",
+            "title" => "Referral GS Summary"
+          },
+          "1" => %{
+            "icon" => "book-solid",
+            "path" => "/referral_gs_details",
+            "title" => "Referral GS Details"
+          },
+          "2" => %{
+            "icon" => "book-solid",
+            "path" => "/gs_summary",
+            "title" => "Placement GS Summary"
+          },
+          "3" => %{
+            "icon" => "book-solid",
+            "path" => "/group_sales_details",
+            "title" => "Placement GS Details"
+          }
+        },
+        "icon" => "",
+        "path" => "#",
+        "title" => "GroupSales"
+      },
+      "6" => %{
+        "icon" => "book-solid",
+        "path" => "/deliveries",
+        "title" => "Deliveries"
+      },
+      "7" => %{
+        "icon" => "book-solid",
+        "path" => "/merchants",
+        "title" => "Merchants"
+      },
+      "8" => %{"icon" => "book-solid", "path" => "/sales", "title" => "Sales"},
+      "9" => %{
+        "children" => %{
+          "0" => %{
+            "icon" => "book-solid",
+            "path" => "/products",
+            "title" => "Product"
+          },
+          "1" => %{"icon" => "book-solid", "path" => "/stocks", "title" => "Stocks"},
+          "2" => %{
+            "icon" => "book-solid",
+            "path" => "/stock_adjustments",
+            "title" => "Stock Adjustments"
+          },
+          "3" => %{
+            "icon" => "book-solid",
+            "path" => "/stocks/summaries",
+            "title" => "Stocks Summaries"
+          }
+        },
+        "icon" => "",
+        "path" => "#",
+        "title" => "Stocks"
+      }
+    }
+  end
+
+  def update_admin_menus(list) do
+    IO.inspect(list)
+    # how to retain existing role app route?
+
+    rars = Repo.all(from(r in Role, preload: [:app_routes]))
+
+    Multi.new()
+    |> Multi.run(:update, fn _repo, %{} ->
+      Repo.delete_all(AppRoute)
+      Repo.delete_all(RoleAppRoute)
+
+      for role <- rars do
+        list = list |> Map.values()
+
+        for menu <- list do
+          {:ok, route} =
+            create_app_route(%{
+              "name" => menu |> Map.get("title"),
+              "route" => menu |> Map.get("path"),
+              "icon" => menu |> Map.get("icon")
+            })
+
+          admin_role = get_admin_staff()
+
+          cg =
+            RoleAppRoute.changeset(%RoleAppRoute{}, %{
+              role_id: role.id,
+              app_route_id: route.id
+            })
+
+          if role.name == admin_role.name do
+            cg
+            |> Repo.insert()
+          else
+            if role.app_routes
+               |> Enum.filter(&(&1.route == route.route))
+               |> Enum.filter(&(&1.name == route.name)) != [] do
+              cg
+              |> Repo.insert()
+            end
+          end
+
+          children = Map.get(menu, "children", %{}) |> Map.values()
+
+          for child <- children do
+            {:ok, croute} =
+              create_app_route(%{
+                "name" => child |> Map.get("title"),
+                "route" => child |> Map.get("path"),
+                "icon" => child |> Map.get("icon")
+              })
+
+            ccg =
+              RoleAppRoute.changeset(%RoleAppRoute{}, %{
+                role_id: role.id,
+                app_route_id: croute.id
+              })
+
+            if role.name == admin_role.name do
+              ccg
+              |> Repo.insert()
+            else
+              if role.app_routes
+                 |> Enum.filter(&(&1.route == croute.route))
+                 |> Enum.filter(&(&1.name == croute.name)) != [] do
+                ccg
+                |> Repo.insert()
+              end
+            end
+          end
+        end
+      end
+
+      {:ok, nil}
+    end)
+    |> Repo.transaction()
+  end
+
+  def update_svt_menus() do
+    menu_list() |> update_admin_menus()
+  end
+
+  def populate_menus(menus) do
+    rars = Repo.all(from(r in Role, preload: [:app_routes]))
+
+    Multi.new()
+    |> Multi.run(:update, fn _repo, %{} ->
+      Repo.delete_all(AppRoute)
+      Repo.delete_all(RoleAppRoute)
+
+      for role <- rars do
+        for menu <- menus do
+          {:ok, route} =
+            create_app_route(%{
+              "name" => menu |> Map.get("title"),
+              "route" => menu |> Map.get("path"),
+              "icon" => menu |> Map.get("icon")
+            })
+
+          admin_role = get_admin_staff()
+
+          cg =
+            RoleAppRoute.changeset(%RoleAppRoute{}, %{
+              role_id: role.id,
+              app_route_id: route.id
+            })
+
+          if role.name == admin_role.name do
+            cg
+            |> Repo.insert()
+          else
+            if role.app_routes
+               |> Enum.filter(&(&1.route == route.route))
+               |> Enum.filter(&(&1.name == route.name)) != [] do
+              cg
+              |> Repo.insert()
+            end
+          end
+
+          children = Map.get(menu, "children", %{})
+
+          for child <- children do
+            {:ok, croute} =
+              create_app_route(%{
+                "name" => child |> Map.get("title"),
+                "route" => child |> Map.get("path"),
+                "icon" => child |> Map.get("icon")
+              })
+
+            ccg =
+              RoleAppRoute.changeset(%RoleAppRoute{}, %{
+                role_id: role.id,
+                app_route_id: croute.id
+              })
+
+            if role.name == admin_role.name do
+              ccg
+              |> Repo.insert()
+            else
+              if role.app_routes
+                 |> Enum.filter(&(&1.route == croute.route))
+                 |> Enum.filter(&(&1.name == croute.name)) != [] do
+                ccg
+                |> Repo.insert()
+              end
+            end
+          end
+        end
+      end
+
+      {:ok, nil}
+    end)
+    |> Repo.transaction()
+  end
+
+  alias BlogEngine.Settings.Blog
+
+  def list_blogs(opts \\ nil, limit \\ 10) do
+    category_name = opts |> Map.get("category", nil)
+
+    is_page = opts |> Map.get("is_page", false)
+
+    limit = opts |> Map.get("limit", limit)
+
+    only_child = opts |> Map.get("only_child", false)
+
+    q =
+      if category_name != nil do
+        from(b in Blog,
+          left_join: c in BlogEngine.Settings.Category,
+          on: c.id == b.category_id,
+          left_join: cc in BlogEngine.Settings.Category,
+          on: cc.id == c.parent_id,
+          where: cc.name == ^category_name,
+          or_where: c.name == ^category_name,
+          preload: [:category, :stored_medias],
+          limit: ^limit,
+          order_by: [desc: b.inserted_at]
+        )
+      else
+        from(b in Blog,
+          preload: [:category, :stored_medias],
+          limit: ^limit,
+          order_by: [desc: b.inserted_at]
+        )
+      end
+
+    q =
+      if only_child do
+        q
+        |> where([b, c, cc], c.name != ^category_name)
+      else
+        q
+      end
+
+    Repo.all(q)
+  end
+
+  def list_blog_next_prev(id, category_id) do
+    # b = Repo.all(from b in Blog, where: b.id == ^id) |> List.first()
+
+    list =
+      Repo.all(
+        from(b in Blog,
+          where: b.category_id == ^category_id,
+          order_by: [asc: b.inserted_at],
+          select: %{id: b.id, inserted_at: b.inserted_at, title: b.title}
+        )
+      )
+      |> IO.inspect()
+
+    index = Enum.find_index(list, &(&1.id == id)) |> IO.inspect()
+
+    prev =
+      if index == 0 do
+        nil
+      else
+        Enum.at(list, index - 1)
+      end
+
+    next = Enum.at(list, index + 1)
+
+    %{next: next, prev: prev}
+  end
+
+  def get_blog!(id) do
+    Repo.get!(Blog, id) |> Repo.preload([:category, :stored_medias])
+  end
+
+  def create_blog(params \\ %{}) do
+    Blog.changeset(%Blog{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_blog(model, params) do
+    Blog.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_blog(%Blog{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.Category
+
+  def list_categories() do
+    Repo.all(Category)
+  end
+
+  def get_category!(id) do
+    Repo.get!(Category, id)
+  end
+
+  def create_category(params \\ %{}) do
+    Category.changeset(%Category{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_category(model, params) do
+    Category.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_category(%Category{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.StoredMedia
+
+  def list_stored_medias() do
+    Repo.all(StoredMedia)
+  end
+
+  def get_stored_media!(id) do
+    Repo.get!(StoredMedia, id)
+  end
+
+  def create_stored_media(params \\ %{}) do
+    StoredMedia.changeset(%StoredMedia{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_stored_media(model, params) do
+    StoredMedia.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_stored_media(%StoredMedia{} = model) do
+    Repo.delete(model)
+  end
+end
