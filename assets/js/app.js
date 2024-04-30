@@ -217,6 +217,19 @@ if (isDev) {
 
 
 
+  var topic = "user:lobby";
+  // Join the topic
+  let channel = socket.channel(topic, {});
+  channel
+    .join()
+    .receive("ok", (data) => {
+      console.log("Joined topic", topic);
+    })
+    .receive("error", (resp) => {
+      console.log("Unable to join topic", topic);
+    });
+
+
 $(document).on("click", "a.navi", function(event) {
   phxApp.show()
   event.preventDefault();
