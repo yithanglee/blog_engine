@@ -9,6 +9,147 @@ defmodule BlogEngine.Settings do
   require IEx
   alias Ecto.Multi
 
+  def append_bool_key(params, bool_key) do
+    if bool_key in Map.keys(params) do
+      params |> Map.put(bool_key, Map.get(params, bool_key) == "on")
+    else
+      params |> Map.put(bool_key, false)
+    end
+  end
+
+  alias BlogEngine.Settings.DeviceLog
+
+  def list_device_logs() do
+    Repo.all(DeviceLog)
+  end
+
+  def get_device_log!(id) do
+    Repo.get!(DeviceLog, id)
+  end
+
+  def create_device_log(params \\ %{}) do
+    DeviceLog.changeset(%DeviceLog{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_device_log(model, params) do
+    DeviceLog.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_device_log(%DeviceLog{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.Outlet
+
+  def list_outlets() do
+    Repo.all(Outlet)
+  end
+
+  def get_outlet!(id) do
+    Repo.get!(Outlet, id)
+  end
+
+  def create_outlet(params \\ %{}) do
+    bool_key = "is_blocked"
+    params = append_bool_key(params, bool_key)
+    Outlet.changeset(%Outlet{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_outlet(model, params) do
+    bool_key = "is_blocked"
+    params = append_bool_key(params, bool_key)
+    Outlet.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_outlet(%Outlet{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.Sale
+
+  def list_sales() do
+    Repo.all(Sale)
+  end
+
+  def get_sale!(id) do
+    Repo.get!(Sale, id)
+  end
+
+  def create_sale(params \\ %{}) do
+    Sale.changeset(%Sale{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_sale(model, params) do
+    Sale.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_sale(%Sale{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.Item
+
+  def list_items() do
+    Repo.all(Item)
+  end
+
+  def get_item!(id) do
+    Repo.get!(Item, id)
+  end
+
+  def create_item(params \\ %{}) do
+    Item.changeset(%Item{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_item(model, params) do
+    Item.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_item(%Item{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.Device
+
+  def list_devices() do
+    Repo.all(Device)
+  end
+
+  def get_device_by_name(id) do
+    Repo.get_by(Device, name: id)
+  end
+
+  def get_device!(id) do
+    Repo.get!(Device, id)
+  end
+
+  def create_update_device(params \\ %{}) do
+    device = get_device_by_name(params |> Map.get("user_id"))
+
+    if device == nil do
+      {:ok, dev} =
+        Device.changeset(%Device{}, %{"name" => params |> Map.get("user_id")}) |> Repo.insert()
+
+      dev
+    else
+      device
+    end
+  end
+
+  def create_device(params \\ %{}) do
+    Device.changeset(%Device{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_device(model, params) do
+    bool_key = "is_active"
+    params = append_bool_key(params, bool_key)
+    Device.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_device(%Device{} = model) do
+    Repo.delete(model)
+  end
+
   alias BlogEngine.Settings.Slide
 
   def list_slides(is_show) do
@@ -17,14 +158,6 @@ defmodule BlogEngine.Settings do
 
   def get_slide!(id) do
     Repo.get!(Slide, id)
-  end
-
-  def append_bool_key(params, bool_key) do
-    if bool_key in Map.keys(params) do
-      params |> Map.put(bool_key, Map.get(params, bool_key) == "on")
-    else
-      params
-    end
   end
 
   def create_slide(params \\ %{}) do

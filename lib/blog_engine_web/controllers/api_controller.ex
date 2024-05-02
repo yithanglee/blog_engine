@@ -202,9 +202,20 @@ defmodule BlogEngineWeb.ApiController do
             %{status: "error", reason: "Please contact admin."}
           end
 
-        "slides" ->
-          Settings.list_slides(true)
-          |> Enum.map(&(&1 |> BluePotion.sanitize_struct()))
+        "get_device" ->
+          Settings.get_device!(params["id"])
+          |> BluePotion.sanitize_struct()
+
+        "get_device_commands" ->
+          [
+            %{name: "Send 5 reps", value: 5, action: "start"},
+            %{name: "Send 10 reps", value: 10, action: "start"},
+            %{name: "Send 5 reps (longer 0.4)", value: 5, action: "start", delay: 0.4},
+            %{name: "Send 10 reps (longer 0.4)", value: 10, action: "start", delay: 0.4},
+            %{name: "Send 5 reps (shorter 0.1)", value: 5, action: "start", delay: 0.1},
+            %{name: "Send 10 reps (shorter 0.1)", value: 10, action: "start", delay: 0.1},
+            %{name: "Send 5 motor reps", value: 5, action: "motor"}
+          ]
 
         "translation" ->
           translation = BlogEngine.translation()
@@ -329,6 +340,27 @@ defmodule BlogEngineWeb.ApiController do
   def post(conn, params) do
     res =
       case params["scope"] do
+        "start_pwm" ->
+          # BlogEngineWeb.Endpoint.broadcast("user:00000000-0000-0000-d83a-dd9f81e5", "ping", %{"action" => "start", "reps" => 10})
+          uuid = Ecto.UUID.generate()
+
+          BlogEngineWeb.Endpoint.broadcast("user:#{params["name"]}", "start_pwm", %{
+            "action" => params["action"],
+            "reps" => params["value"],
+            "delay" => params["delay"],
+            "uuid" => uuid
+          })
+
+          device = BlogEngine.Settings.get_device_by_name(params["name"])
+
+          BlogEngine.Settings.create_device_log(%{
+            device_id: device.id,
+            uuid: uuid,
+            remarks: "manual start #{params["item_name"]}"
+          })
+
+          %{status: "ok"}
+
         "sync_menu" ->
           params["_json"] |> Settings.populate_menus() |> IO.inspect()
           %{status: "ok"}

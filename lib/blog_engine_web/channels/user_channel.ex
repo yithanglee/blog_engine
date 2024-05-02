@@ -7,7 +7,11 @@ defmodule BlogEngineWeb.UserChannel do
     IO.inspect(payload)
 
     if authorized?(payload) do
-      socket = socket |> assign(:device_name, payload |> Map.get("name", "unknown"))
+      socket =
+        socket
+        |> assign(:device_name, payload |> Map.get("name", "unknown"))
+        |> assign(:uuid, payload |> Map.get("user_id", "unknown"))
+
       {:ok, socket}
     else
       {:error, %{reason: "unauthorized"}}
@@ -21,6 +25,22 @@ defmodule BlogEngineWeb.UserChannel do
 
   def handle_in("peer-message", %{"body" => body}, socket) do
     broadcast_from!(socket, "peer-message", %{body: body})
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_in("pwm_response", payload, socket) do
+    IO.inspect("pwm_response")
+    IO.inspect(socket.assigns)
+    IO.inspect(payload)
+    device = BlogEngine.Settings.get_device_by_name(socket.assigns.uuid)
+
+    BlogEngine.Settings.create_device_log(%{
+      device_id: device.id,
+      uuid: payload["uuid"],
+      remarks: "completed manual start #{payload["reps"]}"
+    })
+
     {:noreply, socket}
   end
 
@@ -84,28 +104,15 @@ defmodule BlogEngineWeb.UserChannel do
     {:noreply, socket}
   end
 
-  @impl true
-  def handle_in("get_question", payload, socket) do
-    broadcast(socket, "get_question", payload)
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_in("question", payload, socket) do
-    broadcast(socket, "question", payload)
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_in("answer", payload, socket) do
-    broadcast(socket, "answer", payload)
-    {:noreply, socket}
-  end
-
   # Add authorization logic here as required.
   defp authorized?(payload) do
     IO.inspect("ws auth")
-    IO.inspect(payload)
+
+    if "user_id" in Map.keys(payload) do
+      device = BlogEngine.Settings.create_update_device(payload)
+      IO.inspect(device)
+    end
+
     true
   end
 end
