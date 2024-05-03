@@ -49,7 +49,7 @@ defmodule BlogEngineWeb.UserChannel do
   @impl true
   def handle_in("ping", payload, socket) do
     IO.inspect(payload)
-
+    broadcast(socket, "i_am_online", payload)
     {:reply, {:ok, payload}, socket}
   end
 
