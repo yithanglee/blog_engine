@@ -45,6 +45,14 @@ defmodule BlogEngine.Settings do
     Repo.all(Outlet)
   end
 
+  def get_outlet_by_subdomain(id) do
+    Repo.get_by(Outlet, subdomain: id)
+  end
+
+  def get_outlet_by_uid(id) do
+    Repo.get_by(Outlet, uid: id)
+  end
+
   def get_outlet!(id) do
     Repo.get!(Outlet, id)
   end
@@ -71,8 +79,12 @@ defmodule BlogEngine.Settings do
     Repo.all(Sale)
   end
 
+  def get_sale_by_payment_ref(id) do
+    Repo.get_by(Sale, payment_ref: id) |> Repo.preload([:device, :sales_items])
+  end
+
   def get_sale!(id) do
-    Repo.get!(Sale, id)
+    Repo.get!(Sale, id) |> Repo.preload([:device, sales_items: [:item]])
   end
 
   def create_sale(params \\ %{}) do
@@ -93,8 +105,30 @@ defmodule BlogEngine.Settings do
     Repo.all(Item)
   end
 
+  def list_items_by_device(name) do
+    Repo.all(
+      from(i in Item,
+        left_join: o in BlogEngine.Settings.Outlet,
+        on: o.id == i.outlet_id,
+        left_join: d in BlogEngine.Settings.Device,
+        on: d.outlet_id == o.id,
+        where: d.name == ^name
+      )
+    )
+  end
+
+  def list_items_by_subdomain(code) do
+    Repo.all(
+      from(i in Item,
+        left_join: o in BlogEngine.Settings.Outlet,
+        on: o.id == i.outlet_id,
+        where: o.subdomain == ^code
+      )
+    )
+  end
+
   def get_item!(id) do
-    Repo.get!(Item, id)
+    Repo.get!(Item, id) |> Repo.preload(:outlet)
   end
 
   def create_item(params \\ %{}) do
@@ -109,6 +143,28 @@ defmodule BlogEngine.Settings do
     Repo.delete(model)
   end
 
+  alias BlogEngine.Settings.SalesItem
+
+  def list_sales_items() do
+    Repo.all(SalesItem)
+  end
+
+  def get_sales_item!(id) do
+    Repo.get!(SalesItem, id)
+  end
+
+  def create_sales_item(params \\ %{}) do
+    SalesItem.changeset(%SalesItem{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_sales_item(model, params) do
+    SalesItem.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_sales_item(%SalesItem{} = model) do
+    Repo.delete(model)
+  end
+
   alias BlogEngine.Settings.Device
 
   def list_devices() do
@@ -116,7 +172,7 @@ defmodule BlogEngine.Settings do
   end
 
   def get_device_by_name(id) do
-    Repo.get_by(Device, name: id)
+    Repo.get_by(Device, name: id) |> Repo.preload(:outlet)
   end
 
   def get_device!(id) do

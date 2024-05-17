@@ -21,10 +21,13 @@ defmodule BlogEngine.Settings.Sale do
   )
 
   schema "sales" do
+    field(:uid, :string)
     field(:amount, :float)
-    field(:outlet_id, :integer)
+    belongs_to(:outlet, BlogEngine.Settings.Outlet)
+    # field(:outlet_id, :integer)
     # field(:device_id, :integer)
     belongs_to(:device, BlogEngine.Settings.Device)
+    has_many(:sales_items, BlogEngine.Settings.SalesItem, foreign_key: :sales_id)
     field(:payment_channel, :string)
     field(:payment_ref, :string)
     field(:payment_webhook, :binary)
@@ -38,6 +41,7 @@ defmodule BlogEngine.Settings.Sale do
   def changeset(sale, attrs) do
     sale
     |> cast(attrs, [
+      :uid,
       :outlet_id,
       :device_id,
       :amount,
@@ -47,14 +51,15 @@ defmodule BlogEngine.Settings.Sale do
       :payment_webhook,
       :sales_date
     ])
-    |> validate_required([
-      :outlet_id,
-      :amount,
-      :status,
-      :payment_ref,
-      :payment_channel,
-      :payment_webhook,
-      :sales_date
-    ])
+
+    # |> validate_required([
+    #   :outlet_id,
+    #   :amount,
+    #   :status,
+    #   :payment_ref,
+    #   :payment_channel,
+    #   :payment_webhook,
+    #   :sales_date
+    # ])
   end
 end

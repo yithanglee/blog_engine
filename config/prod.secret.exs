@@ -80,3 +80,14 @@ config :blog_engine, BlogEngine.Mailer,
   no_mx_lookups: false,
   # can be `:always`. If your smtp relay requires authentication set it to `:always`.
   auth: :if_available
+
+config :blog_engine, :revenue_monster,
+  prefix: "SO",
+  key: System.get_env("RM_API_KEY_PROD"),
+  endpoint: System.get_env("RM_API_ENDPOINT_PROD"),
+  callback: System.get_env("RM_API_CALLBACK_URL_PROD"),
+  oauth: System.get_env("RM_AUTH_API_PROD"),
+  client_id: System.get_env("RM_CLIENT_ID_PROD"),
+  client_secret: System.get_env("RM_CLIENT_SECRET_PROD"),
+  private_key: System.get_env("RM_CLIENT_PRIVATE_KEY_PROD"),
+  cert_location: "/priv/cert/private_key_prod.pem"

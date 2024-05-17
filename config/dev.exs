@@ -66,6 +66,27 @@ config :phoenix, :plug_init_mode, :runtime
 
 config :blog_engine, url: System.get_env("ENDPOINT")
 
+# config :blog_engine, :revenue_monster,
+#   key: System.get_env("RM_API_KEY"),
+#   endpoint: System.get_env("RM_API_ENDPOINT"),
+#   callback: System.get_env("RM_API_CALLBACK_URL"),
+#   oauth: System.get_env("RM_AUTH_API"),
+#   client_id: System.get_env("RM_CLIENT_ID"),
+#   client_secret: System.get_env("RM_CLIENT_SECRET"),
+#   private_key: System.get_env("RM_CLIENT_PRIVATE_KEY"),
+#   cert_location: "/priv/cert/private_key.pem"
+
+config :blog_engine, :revenue_monster,
+  prefix: "TST",
+  key: System.get_env("RM_API_KEY_PROD"),
+  endpoint: System.get_env("RM_API_ENDPOINT_PROD"),
+  callback: System.get_env("RM_API_CALLBACK_URL"),
+  oauth: System.get_env("RM_AUTH_API_PROD"),
+  client_id: System.get_env("RM_CLIENT_ID_PROD"),
+  client_secret: System.get_env("RM_CLIENT_SECRET_PROD"),
+  private_key: System.get_env("RM_CLIENT_PRIVATE_KEY_PROD"),
+  cert_location: "/priv/cert/private_key_prod.pem"
+
 config :blog_engine, :billplz,
   key: System.get_env("BILLPLZ_API_KEY"),
   endpoint: System.get_env("BILLPLZ_API_ENDPOINT"),

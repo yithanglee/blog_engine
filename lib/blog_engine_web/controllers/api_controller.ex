@@ -164,6 +164,78 @@ defmodule BlogEngineWeb.ApiController do
 
     res =
       case params["scope"] do
+        "get_time" ->
+          timestamp = DateTime.utc_now() |> DateTime.to_unix()
+          %{time: timestamp}
+
+        "pay_service" ->
+          outlet_item = Settings.get_item!(params["id"]) |> BluePotion.sanitize_struct()
+          device = Settings.get_device_by_name(params["device"])
+
+          {:ok, s} =
+            Settings.create_sale(%{
+              sales_date: Date.utc_today(),
+              outlet_id: outlet_item.outlet.id,
+              device_id: device.id,
+              amount: outlet_item.price,
+              status: :pending_payment,
+              uid: Ecto.UUID.generate()
+            })
+
+          Settings.create_sales_item(%{
+            item_id: outlet_item.id,
+            sales_id: s.id,
+            item_amount: outlet_item.price,
+            item_name: outlet_item.name,
+            qty: 1,
+            subtotal: outlet_item.price * 1
+          })
+
+          res =
+            RevenueMonster.pay(
+              outlet_item.outlet.uid,
+              s.id,
+              (outlet_item.price * 100) |> :erlang.trunc(),
+              outlet_item.name
+            )
+
+          sample_res = %{
+            "code" => "SUCCESS",
+            "item" => %{
+              "checkoutId" => "1715311946540550828",
+              "url" => "https://pg.revenuemonster.my/v3/checkout?checkoutId=1715311946540550828"
+            }
+          }
+
+          # s |> BluePotion.sanitize_struct()
+
+          case res["code"] do
+            "SUCCESS" ->
+              Settings.update_sale(s, %{payment_ref: res["item"]["checkoutId"]})
+              res["item"]["url"]
+          end
+
+        "get_outlet" ->
+          Settings.get_outlet_by_subdomain(params["code"])
+          |> BluePotion.sanitize_struct()
+          |> Map.take([:address, :name])
+
+        "get_items_by_device" ->
+          Settings.list_items_by_device(params["user_id"])
+          |> Enum.map(
+            &(&1
+              |> BluePotion.sanitize_struct()
+              |> Map.take([:id, :name, :price, :image_url]))
+          )
+
+        "get_items" ->
+          Settings.list_items_by_subdomain(params["code"])
+          |> Enum.map(
+            &(&1
+              |> BluePotion.sanitize_struct()
+              |> Map.take([:id, :name, :price, :image_url]))
+          )
+
         "blog" ->
           b = Settings.get_blog!(params["id"])
 
@@ -286,77 +358,197 @@ defmodule BlogEngineWeb.ApiController do
     end
   end
 
+  @doc """
+  BlogEngine.Settings.get_sale!(16)
+  """
   def payment(conn, params) do
-    payment = Settings.get_payment_by_billplz_code(params["id"])
+    IO.inspect(params)
+    data = Map.get(params, "data")
 
-    res =
-      with true <- params["paid"] == "true",
-           true <- payment != nil,
-           true <- payment.sales != nil,
-           sales <- payment.sales,
-           {:ok, register_params} <- sales.registration_details |> Jason.decode() do
-        case Settings.register(register_params["user"], sales) do
-          {:ok, multi_res} ->
-            %{status: "ok", res: multi_res |> BluePotion.sanitize_struct()}
+    order = Map.get(data, "order")
+    store = Map.get(data, "store")
 
-          _ ->
-            %{status: "error"}
-        end
-      else
-        _ ->
-          with true <- payment.wallet_topup != nil do
-            case Settings.approve_topup(%{"id" => payment.wallet_topup.id}) do
-              {:ok, tp} ->
-                %{status: "ok", res: tp |> BluePotion.sanitize_struct()}
+    sale =
+      BlogEngine.Settings.get_sale!(Map.get(order, "id") |> String.replace("SO", ""))
+      |> IO.inspect()
 
-              _ ->
-                %{status: "error"}
-            end
-          else
-            _ ->
-              %{status: "ok"}
-          end
-      end
+    outlet = BlogEngine.Settings.get_outlet_by_uid(store["id"])
+    status = Map.get(data, "status") |> IO.inspect()
+
+    case status do
+      "SUCCESS" ->
+        nil
+
+        uuid = Ecto.UUID.generate()
+
+        device = sale.device
+        item = sale.sales_items |> List.first() |> Map.get(:item) |> IO.inspect()
+
+        BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
+          "action" => "start",
+          "reps" => item.reps,
+          "delay" => item.delay,
+          "uuid" => uuid,
+          "pin" => device.default_io_pin
+        })
+
+        BlogEngine.Settings.create_device_log(%{
+          device_id: device.id,
+          uuid: uuid,
+          remarks:
+            "sales id:#{sale.id} start #{item.name} with reps: #{item.reps} delay: #{item.delay} on pin #{device.default_io_pin}"
+        })
+        |> IO.inspect()
+
+        BlogEngine.Settings.update_sale(sale, %{
+          payment_webhook: params |> Jason.encode!(),
+          status: :complete
+        })
+        |> IO.inspect()
+
+      _ ->
+        nil
+    end
 
     sample = %{
-      "amount" => "500000",
-      "collection_id" => "greljvdq",
-      "due_at" => "2023-11-18",
-      "email" => "a@1.com",
-      "id" => "ywkq6y7x",
-      "mobile" => "",
-      "name" => "1",
-      "paid" => "true",
-      "paid_amount" => "500000",
-      "paid_at" => "2023-11-18 16:16:29 +0800",
-      "state" => "paid",
-      "url" => "https://www.billplz-sandbox.com/bills/ywkq6y7x",
-      "x_signature" => "20fe8afe691277badffd74ad3bbeaafe6f54b5c502ed91bd557b88678338b627"
+      "data" => %{
+        "balanceAmount" => 100,
+        "createdAt" => "2024-05-09T08:29:47Z",
+        "currencyType" => "MYR",
+        "method" => "MAYBANK",
+        "order" => %{
+          "additionalData" => "world",
+          "detail" => "",
+          "id" => "7213",
+          "title" => "hello"
+        },
+        "payee" => %{},
+        "platform" => "OPEN_API",
+        "referenceId" => "MBBQR111111605072728",
+        "region" => "MALAYSIA",
+        "status" => "SUCCESS",
+        "store" => %{
+          "addressLine1" => "NO 65,  JALAN SL 9 9D,",
+          "addressLine2" => "BANDAR SUNGAI LONG",
+          "city" => "Kajang",
+          "country" => "Malaysia",
+          "countryCode" => "60",
+          "createdAt" => "2023-10-10T10:42:55Z",
+          "geoLocation" => %{"latitude" => 3.0515925, "longitude" => 101.8087651},
+          "id" => "1696934575998530788",
+          "imageUrl" => "https://storage.googleapis.com/rm-prod-asset/img/store.png",
+          "name" => "ERA HEALTHCARE ENTERPRISE",
+          "phoneNumber" => "162056662",
+          "postCode" => "43000",
+          "state" => "Selangor",
+          "status" => "ACTIVE",
+          "updatedAt" => "2023-10-16T07:30:01Z"
+        },
+        "terminalId" => "",
+        "transactionAt" => "2024-05-09T08:30:17Z",
+        "transactionId" => "17152433871587",
+        "type" => "WEB_PAYMENT",
+        "updatedAt" => "2024-05-09T08:30:19Z",
+        "voucher" => nil
+      },
+      "eventType" => "PAYMENT_WEB_ONLINE",
+      "model" => "billplz"
     }
 
-    json(conn, res)
+    json(conn, %{status: "ok"})
   end
 
   def post(conn, params) do
     res =
       case params["scope"] do
+        "checkout" ->
+          sample = %{
+            "item_id" => 2,
+            "scope" => "checkout",
+            "user_id" => "00000000-0000-0000-d83a-dda0064d"
+          }
+
+          outlet_item = Settings.get_item!(params["item_id"]) |> BluePotion.sanitize_struct()
+          device = Settings.get_device_by_name(params["user_id"])
+
+          {:ok, s} =
+            Settings.create_sale(%{
+              sales_date: Date.utc_today(),
+              outlet_id: outlet_item.outlet.id,
+              device_id: device.id,
+              amount: outlet_item.price,
+              status: :pending_payment,
+              uid: Ecto.UUID.generate()
+            })
+
+          Settings.create_sales_item(%{
+            item_id: outlet_item.id,
+            sales_id: s.id,
+            item_amount: outlet_item.price,
+            item_name: outlet_item.name,
+            qty: 1,
+            subtotal: outlet_item.price * 1
+          })
+
+          res =
+            RevenueMonster.pay(
+              outlet_item.outlet.uid,
+              "#{Application.get_env(:blog_engine, :revenue_monster)[:prefix]}#{s.id}",
+              (outlet_item.price * 100) |> :erlang.trunc(),
+              outlet_item.name
+            )
+
+          final_data =
+            case res["code"] do
+              "SUCCESS" ->
+                checkout_id = Map.get(res, "item") |> Map.get("checkoutId")
+                res2 = RevenueMonster.direct_checkout(checkout_id)
+
+                sample_res2 = %{
+                  "code" => "SUCCESS",
+                  "item" => %{
+                    "qrcode" => %{
+                      "base64Image" =>
+                        "iVBORw0KGgoAAAANSUhEUgAAAQkAAAEJCAAAAACiA424AAAD2klEQVR42u3dwW7bQAwEUP//T6eHHgIU9mqGu3Jc5OmUpIkiPQMiPWTbx5fj7/FAQIIECRIkSJAgQYIECRIkSJAgQYLE/yTxuD7WP/HP15593/en67OsT/Xs0/7qSZAgQWJT4vVD9smNvNQJTvBSJ+BYm1T3RoIECRKbEutL3akJ61sKPlr/tur3kiBBgsSbJNZ3HdxIj5C+DCRIkCDxORL9pabZQdV8kyBBgsRHSAR/ur6i4GtpEdhOIEiQIEHiLontJ/yPfvTmaSAJEiR+r8TWulI4wupz4b6B7i6cBAkSJCYSfQKRphxBfRrO1NL3BSRIkCBxVqIaL61/4uVZgq2B7TC3YyNBggSJPYnhE7laNqhMDuYYJEiQIHFWIu2x13nqurIET/1khNWcmQQJEiRukBh2uMPbDGSHccrJKkqCBAkSV/100PX2haaagQ0Xug5l2yRIkCCRb6YGT/N+7XTn7zL1tz7dOCNBggSJK4ngrNU99Klx2jvf3W2TIEGCxFU+kTa3QYSbzsDSR/8wrpju8pMgQYJEOQOrxl9po10lFRV0f5AgQYLEpsQ6fOjXqaorr05VLaqSIEGCxDGJ4TCr6s/Tef9w2WBQA0mQIEFiIhEkFcMV+3Si1acN/YSMBAkSJM5KrKtIVSeGiwXD+Ldv8EmQIEFiLnHmXX9aCYJthWBltQckQYIEiRM5ZvVsrjYJqvOtv7mfvQ2SGhIkSJCIJPo8IU1WgzwhaKrTV2C/dpAgQYJE3m33DW/wzf3ka9iQn8wnSJAgQSJPVtM2vF9AqGpHtQKbRCckSJAgMZGoGugqCei76HShoWrISZAgQeKYxHCPKR3mV/Ouan62U0pIkCBB4sS/XdRvTfU5xrBnD94XHH/fQYIECRL59D4IbtMLHC6+DuvJfhUlQYIEiUnaEDSy1bLVcD01ld3PJ0iQIEGi3BpIs93uEpoxWb92sJ9tkyBBgkQ0A+uH/kFrvlOVKo79bpsECRIk9rYGupw0XPfv9/GDGd3d+xMkSJAgEcUL1YA/3cKqctweazADI0GCBIko0U1H88OQ4nF9pPOzPuAlQYIEiWMSpzvwdEM0SCWC06evKAkSJEjctWeVjv+rtYMzH/XTMBIkSJA4K7Ed0gZYQY2pGu20qJAgQYLEDRJ9YpBmwFUq0VeRQaZCggQJEndKpGFBkqceWTatBnUkSJAg8U6JYBE0SCWCKxi+KlXzTYIECRKbEn3QkNaJHitFSAsNCRIkSByTqFKE/oarCHcnn4gBSZAgQWL8//z8toMECRIkSJAgQYIECRIkSJAgQYIECRKfevwB/xVtL1UEI1YAAAAASUVORK5CYII="
+                    },
+                    "type" => "DUITNOW_QRCODE"
+                  }
+                }
+
+                case res2["code"] do
+                  "SUCCESS" ->
+                    b64 = res2 |> Map.get("item") |> Map.get("qrcode") |> Map.get("base64Image")
+                    ImageConverter.decode_and_save_as_bmp(b64, "so_#{s.id}.bmp")
+                    "so_#{s.id}.bmp"
+
+                  _ ->
+                    "test.bmp"
+                end
+
+              _ ->
+                "test.bmp"
+            end
+
+          %{name: final_data}
+
         "start_pwm" ->
           # BlogEngineWeb.Endpoint.broadcast("user:00000000-0000-0000-d83a-dd9f81e5", "ping", %{"action" => "start", "reps" => 10})
           uuid = Ecto.UUID.generate()
+
+          device = BlogEngine.Settings.get_device_by_name(params["name"])
 
           BlogEngineWeb.Endpoint.broadcast("user:#{params["name"]}", "start_pwm", %{
             "action" => params["action"],
             "reps" => params["value"],
             "delay" => params["delay"],
-            "uuid" => uuid
+            "uuid" => uuid,
+            "pin" => device.default_io_pin
           })
-
-          device = BlogEngine.Settings.get_device_by_name(params["name"])
 
           BlogEngine.Settings.create_device_log(%{
             device_id: device.id,
             uuid: uuid,
-            remarks: "manual start #{params["item_name"]}"
+            remarks: "manual start #{params["item_name"]} on pin #{device.default_io_pin}"
           })
 
           %{status: "ok"}
@@ -1456,7 +1648,7 @@ defmodule BlogEngineWeb.ApiController do
       end
     end
 
-    json = Map.put(json, :data, data |> sanitize_pw.())
+    json = Map.put(json, :data, data)
 
     conn
     |> put_resp_content_type("application/json")

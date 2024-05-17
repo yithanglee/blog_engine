@@ -42,6 +42,7 @@ defmodule BlogEngine.MixProject do
        override: true, git: "https://github.com/yithanglee/blue_potion"},
       {:cors_plug, "~> 1.0"},
       {:distillery, "~> 2.1"},
+      {:ex_crypto, "~> 0.10.0"},
       {:mime, "~> 1.0"},
       {:phoenix, "~> 1.5.13"},
       {:phoenix_ecto, "~> 4.1"},
