@@ -81,6 +81,8 @@ config :blog_engine, BlogEngine.Mailer,
   # can be `:always`. If your smtp relay requires authentication set it to `:always`.
   auth: :if_available
 
+config :blog_engine, :ipay88, callback: System.get_env("IPAY88_CALLBACK_PROD")
+
 config :blog_engine, :revenue_monster,
   prefix: "SO",
   key: System.get_env("RM_API_KEY_PROD"),

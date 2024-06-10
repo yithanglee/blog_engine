@@ -59,9 +59,10 @@ defmodule BlogEngine.MixProject do
       {:plug_cowboy, "~> 2.0"},
       {:poison, "~> 3.0"},
       {:mogrify, "~> 0.9.1"},
-      {:sweet_xml, "~> 0.7"},
+      {:sweet_xml, "~> 0.6.6"},
       {:web_push_encryption, "~> 0.3"},
       {:timex, "~> 3.0"},
+      {:soap, "~> 1.1.1"},
       {:quantum, "~> 2.0"}
     ]
   end

@@ -7,11 +7,26 @@ defmodule BlogEngineWeb.UserChannel do
     IO.inspect(payload)
 
     if authorized?(payload) do
+      device =
+        if payload |> Map.get("user_id") do
+          d = BlogEngine.Settings.get_device_by_name(payload |> Map.get("user_id"))
+
+          if d.record_wifi_time do
+            d
+          else
+            %{id: nil}
+          end
+        else
+          %{id: nil}
+        end
+
       socket =
         socket
         |> assign(:device_name, payload |> Map.get("name", "unknown"))
         |> assign(:uuid, payload |> Map.get("user_id", "unknown"))
+        |> assign(:device_id, device.id)
 
+      delay_start_outstanding_works(room_id)
       {:ok, socket}
     else
       {:error, %{reason: "unauthorized"}}
@@ -48,7 +63,15 @@ defmodule BlogEngineWeb.UserChannel do
   # by sending replies to requests from the client
   @impl true
   def handle_in("ping", payload, socket) do
-    IO.inspect(payload)
+    # IO.inspect(payload)
+    # IO.inspect(socket)
+    if socket.assigns.device_id != nil do
+      Elixir.Task.start_link(BlogEngine.Settings, :create_device_time_log, [
+        %{device_id: socket.assigns.device_id}
+      ])
+    end
+
+    # here check outstanding work 
     broadcast(socket, "i_am_online", payload)
     {:reply, {:ok, payload}, socket}
   end
@@ -70,13 +93,6 @@ defmodule BlogEngineWeb.UserChannel do
       Timex.now()
       |> Timex.Timezone.convert("GMT+8")
       |> Timex.format!("{YYYY}-{0M}-{0D} {h24}:{m}:{s}")
-
-    BlogEngine.send_sqs(%{
-      "scope" => "register",
-      "name" => socket.assigns.device_name,
-      "uuid" => payload["uuid"],
-      "last_updated" => dt
-    })
 
     {:noreply, socket}
   end
@@ -114,5 +130,10 @@ defmodule BlogEngineWeb.UserChannel do
     end
 
     true
+  end
+
+  defp delay_start_outstanding_works(uuid) do
+    Process.sleep(2000)
+    Elixir.Task.start_link(BlogEngine.Settings, :get_outstanding_works, [uuid])
   end
 end

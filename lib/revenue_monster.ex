@@ -6,10 +6,25 @@ defmodule RevenueMonster do
   @callback_url Application.get_env(:blog_engine, :revenue_monster)[:callback]
   @redirect_url Application.get_env(:blog_engine, :url)
 
+  def query_map(checkout_id) do
+    %{
+      "checkoutId" => checkout_id
+    }
+    |> Jason.encode!()
+  end
+
+  def plain_text_params_query(
+        checkout_id,
+        ts \\ 1_527_407_052,
+        nonce_string \\ "VYNknZohxwicZMaWbNdBKUrnrxDtaRhN"
+      ) do
+    "data=#{query_map(checkout_id) |> Base.encode64()}&method=get&nonceStr=#{nonce_string}&requestUrl=#{Application.get_env(:blog_engine, :revenue_monster)[:endpoint] <> ""}&signType=sha256&timestamp=#{ts}"
+  end
+
   def direct_checkout_map(checkout_id) do
     %{
       "checkoutId" => checkout_id,
-      "type" => "DUITNOW_QRCODE",
+      "type" => "QRCODE",
       "method" => "MAYBANK_MY"
     }
     |> Jason.encode!()
@@ -123,6 +138,49 @@ defmodule RevenueMonster do
     {:ok, signature} = ExPublicKey.sign(data, rsa_priv_key)
 
     encoded_signature = Base.encode64(signature)
+  end
+
+  def query_transaction(checkout_id) do
+    # get
+    url = Application.get_env(:blog_engine, :revenue_monster)[:endpoint] <> ""
+
+    ts = DateTime.utc_now() |> DateTime.to_unix()
+    at = RevenueMonster.credentials() |> Map.get("accessToken")
+    nonce_string = "65ed7033b7505223a6e279e31c7e9487aab92ddccc516c35598d521591770a3f"
+
+    signature =
+      plain_text_params_query(checkout_id, ts, nonce_string)
+      |> IO.inspect()
+      |> pk()
+      |> IO.inspect()
+
+    # HTTPoison.request(:get, url, Jason.encode!(json_body), headers, options)
+    case HTTPoison.request(
+           :get,
+           url,
+           query_map(checkout_id),
+           [
+             {"Content-Type", "application/json"},
+             {"Authorization", "Bearer #{at}"},
+             {"X-Nonce-Str", nonce_string},
+             {"X-Signature", "sha256 #{signature}"},
+             {"X-Timestamp", ts}
+           ]
+         )
+         |> IO.inspect() do
+      {:ok, resp} ->
+        case Jason.decode(resp.body) do
+          {:ok, res} ->
+            nil
+            res |> IO.inspect()
+
+          _ ->
+            nil
+        end
+
+      _ ->
+        nil
+    end
   end
 
   def direct_checkout(checkout_id) do

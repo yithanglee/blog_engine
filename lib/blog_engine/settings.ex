@@ -8,6 +8,7 @@ defmodule BlogEngine.Settings do
   alias BlogEngine.Repo
   require IEx
   alias Ecto.Multi
+  alias BlogEngine.Settings.DeviceTimeLog
 
   def append_bool_key(params, bool_key) do
     if bool_key in Map.keys(params) do
@@ -15,6 +16,26 @@ defmodule BlogEngine.Settings do
     else
       params |> Map.put(bool_key, false)
     end
+  end
+
+  def list_device_time_logs() do
+    Repo.all(DeviceTimeLog)
+  end
+
+  def get_device_time_log!(id) do
+    Repo.get!(DeviceTimeLog, id)
+  end
+
+  def create_device_time_log(params \\ %{}) do
+    DeviceTimeLog.changeset(%DeviceTimeLog{}, params) |> Repo.insert()
+  end
+
+  def update_device_time_log(model, params) do
+    DeviceTimeLog.changeset(model, params) |> Repo.update()
+  end
+
+  def delete_device_time_log(%DeviceTimeLog{} = model) do
+    Repo.delete(model)
   end
 
   alias BlogEngine.Settings.DeviceLog
@@ -84,7 +105,7 @@ defmodule BlogEngine.Settings do
   end
 
   def get_sale!(id) do
-    Repo.get!(Sale, id) |> Repo.preload([:device, sales_items: [:item]])
+    Repo.get!(Sale, id) |> Repo.preload([:outlet, :device, sales_items: [:item]])
   end
 
   def create_sale(params \\ %{}) do
@@ -199,6 +220,10 @@ defmodule BlogEngine.Settings do
   def update_device(model, params) do
     bool_key = "is_active"
     params = append_bool_key(params, bool_key)
+
+    bool_key = "record_wifi_time"
+    params = append_bool_key(params, bool_key)
+
     Device.changeset(model, params) |> Repo.update() |> IO.inspect()
   end
 
@@ -1132,5 +1157,115 @@ defmodule BlogEngine.Settings do
 
   def delete_stored_media(%StoredMedia{} = model) do
     Repo.delete(model)
+  end
+
+  def get_outstanding_works(device_name \\ "00000000-0000-0000-d83a-dda0064d") do
+    q = from(dl in DeviceLog, left_join: d in Device, on: d.id == dl.device_id)
+
+    job_uuids =
+      DeviceLog
+      |> join(:left, [dl], d in Device, on: dl.device_id == d.id)
+      |> where([dl, d], d.name == ^device_name)
+      |> group_by([dl, d], [dl.uuid])
+      |> select([dl, d], %{count: count(dl.uuid), uuid: dl.uuid})
+      |> Repo.all()
+      |> Enum.filter(&(&1.count < 2))
+      |> Enum.map(& &1.uuid)
+      |> IO.inspect()
+
+    jobs =
+      DeviceLog
+      |> where([dl], dl.uuid in ^job_uuids)
+      |> where([dl], is_nil(dl.job_content))
+      |> Repo.delete_all()
+
+    jobs =
+      DeviceLog
+      |> join(:left, [dl], d in Device, on: dl.device_id == d.id)
+      |> where([dl, d], d.name == ^device_name)
+      |> where([dl, d], dl.uuid in ^job_uuids)
+      |> order_by([dl, d], desc: dl.id)
+      |> Repo.all()
+      |> IO.inspect()
+
+    for job <- jobs do
+      uuid = job |> Map.get(:uuid)
+
+      dl =
+        DeviceLog
+        |> where([dl], dl.uuid == ^uuid)
+        |> Repo.all()
+        |> IO.inspect()
+        |> List.first()
+
+      if dl != nil do
+        BlogEngineWeb.Endpoint.broadcast(
+          "user:#{device_name}",
+          "start_pwm",
+          Jason.decode!(dl.job_content)
+        )
+      end
+    end
+  end
+
+  @doc """
+  BlogEngine.Settings.get_call_counts_with_empty_minutes(7, )
+  """
+  def get_call_counts_with_empty_minutes(device_id) do
+    {y, m, d} = Date.utc_today() |> Date.to_erl()
+
+    {:ok, start_datetime} = NaiveDateTime.from_erl({{y, m, d}, {0, 0, 0}}) |> IO.inspect()
+    end_datetime = start_datetime |> Timex.shift(days: 1)
+
+    query = """
+    WITH RECURSIVE minutes_series AS (
+      SELECT
+        date_trunc('minute', min(inserted_at)) AS minute
+      FROM
+        device_time_logs
+      WHERE
+        device_id = $1 AND inserted_at BETWEEN $2 AND $3
+      UNION ALL
+      SELECT
+        minute + interval '1 minute'
+      FROM
+        minutes_series
+      WHERE
+        minute + interval '1 minute' <= (
+          SELECT
+            max(inserted_at)
+          FROM
+            device_time_logs
+          WHERE
+            device_id = $1 AND inserted_at BETWEEN $2 AND $3
+        )
+    )
+    SELECT
+      m.minute,
+      COUNT(d.id) AS call_count
+    FROM
+      minutes_series m
+      LEFT JOIN device_time_logs d ON date_trunc('minute', d.inserted_at) = m.minute AND d.device_id = $1 AND d.inserted_at BETWEEN $2 AND $3
+    GROUP BY
+      m.minute
+    ORDER BY
+      m.minute DESC;
+    """
+
+    Repo.query!(query, [device_id, start_datetime, end_datetime])
+    |> Map.get(:rows)
+  end
+
+  def delete_all_pending_sales() do
+    res = Repo.all(from(s in Sale, where: s.status == ^:pending_payment, preload: [:sales_items]))
+
+    ids = res |> Enum.map(& &1.sales_items) |> List.flatten() |> Enum.map(& &1.id)
+
+    Repo.delete_all(from(si in SalesItem, where: si.id in ^ids))
+
+    res =
+      Repo.delete_all(
+        from(s in Sale, where: s.status == ^:pending_payment, preload: [:sales_items])
+      )
   end
 end

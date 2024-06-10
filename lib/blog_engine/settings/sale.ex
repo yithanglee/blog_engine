@@ -27,7 +27,9 @@ defmodule BlogEngine.Settings.Sale do
     # field(:outlet_id, :integer)
     # field(:device_id, :integer)
     belongs_to(:device, BlogEngine.Settings.Device)
+
     has_many(:sales_items, BlogEngine.Settings.SalesItem, foreign_key: :sales_id)
+
     field(:payment_channel, :string)
     field(:payment_ref, :string)
     field(:payment_webhook, :binary)

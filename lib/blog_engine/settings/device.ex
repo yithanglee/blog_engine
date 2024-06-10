@@ -6,16 +6,28 @@ defmodule BlogEngine.Settings.Device do
     field(:is_active, :boolean, default: false)
     field(:is_suspended, :boolean, default: false)
     field(:name, :string)
+
+    field(:record_wifi_time, :boolean, default: false)
     field(:short_desc, :string)
     belongs_to(:outlet, BlogEngine.Settings.Outlet)
     field(:default_io_pin, :integer, default: 0)
+    belongs_to(:executor_board, BlogEngine.Settings.Device, foreign_key: :executor_board_id)
     timestamps()
   end
 
   @doc false
   def changeset(device, attrs) do
     device
-    |> cast(attrs, [:outlet_id, :default_io_pin, :name, :short_desc, :is_active, :is_suspended])
+    |> cast(attrs, [
+      :record_wifi_time,
+      :executor_board_id,
+      :outlet_id,
+      :default_io_pin,
+      :name,
+      :short_desc,
+      :is_active,
+      :is_suspended
+    ])
 
     # |> validate_required([:name, :short_desc, :is_active, :is_suspended])
   end

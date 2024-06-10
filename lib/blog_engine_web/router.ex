@@ -81,6 +81,7 @@ defmodule BlogEngineWeb.Router do
     pipe_through :plain_api
 
     post "/payment/billplz", ApiController, :payment
+    post "/payment/ipay88", ApiController, :ipay88_payment
   end
 
   scope "/api", BlogEngineWeb do

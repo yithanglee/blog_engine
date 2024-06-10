@@ -10,7 +10,7 @@ defmodule ImageConverter do
     path = File.cwd!() <> "/media"
 
     # Define the fixed size for resizing
-    resize_option = ["-resize", "128x128!"]
+    resize_option = ["-resize", "180x180!"]
 
     # Add the output format and file path
     command = ["temp_image.png"] ++ resize_option ++ ["BMP3:" <> "#{path}/#{filename}"]

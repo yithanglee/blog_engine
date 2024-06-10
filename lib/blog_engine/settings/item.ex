@@ -7,7 +7,9 @@ defmodule BlogEngine.Settings.Item do
     field(:image_url, :string)
     field(:name, :string)
     field(:price, :float)
-    # field(:outlet_id, :integer)
+
+    field(:short_name1, :string)
+    field(:short_name2, :string)
     belongs_to(:outlet, BlogEngine.Settings.Outlet)
     field(:reps, :integer, default: 1)
     field(:delay, :float, default: 0.0)
@@ -18,6 +20,8 @@ defmodule BlogEngine.Settings.Item do
   def changeset(item, attrs) do
     item
     |> cast(attrs, [
+      :short_name1,
+      :short_name2,
       :outlet_id,
       :reps,
       :delay,
