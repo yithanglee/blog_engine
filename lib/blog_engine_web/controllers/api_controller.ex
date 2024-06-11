@@ -172,49 +172,55 @@ defmodule BlogEngineWeb.ApiController do
           outlet_item = Settings.get_item!(params["id"]) |> BluePotion.sanitize_struct()
           device = Settings.get_device_by_name(params["device"])
 
-          {:ok, s} =
-            Settings.create_sale(%{
-              sales_date: Date.utc_today(),
-              outlet_id: outlet_item.outlet.id,
-              device_id: device.id,
-              amount: outlet_item.price,
-              status: :pending_payment,
-              uid: Ecto.UUID.generate()
+          # todo: check the connection health, last 10 seconds was there any count...
+
+          res = BlogEngine.Settings.check_last_mins(device.id)
+
+          if res <= 60 do
+            {:ok, s} =
+              Settings.create_sale(%{
+                sales_date: Date.utc_today(),
+                outlet_id: outlet_item.outlet.id,
+                device_id: device.id,
+                amount: outlet_item.price,
+                status: :pending_payment,
+                uid: Ecto.UUID.generate()
+              })
+
+            Settings.create_sales_item(%{
+              item_id: outlet_item.id,
+              sales_id: s.id,
+              item_amount: outlet_item.price,
+              item_name: outlet_item.name,
+              qty: 1,
+              subtotal: outlet_item.price * 1
             })
 
-          Settings.create_sales_item(%{
-            item_id: outlet_item.id,
-            sales_id: s.id,
-            item_amount: outlet_item.price,
-            item_name: outlet_item.name,
-            qty: 1,
-            subtotal: outlet_item.price * 1
-          })
+            case outlet_item.outlet.payment_gateway do
+              _ ->
+                res =
+                  RevenueMonster.pay(
+                    outlet_item.outlet.uid,
+                    s.id,
+                    (outlet_item.price * 100) |> :erlang.trunc(),
+                    outlet_item.name
+                  )
 
-          case outlet_item.outlet.payment_gateway do
-            _ ->
-              res =
-                RevenueMonster.pay(
-                  outlet_item.outlet.uid,
-                  s.id,
-                  (outlet_item.price * 100) |> :erlang.trunc(),
-                  outlet_item.name
-                )
-
-              sample_res = %{
-                "code" => "SUCCESS",
-                "item" => %{
-                  "checkoutId" => "1715311946540550828",
-                  "url" =>
-                    "https://pg.revenuemonster.my/v3/checkout?checkoutId=1715311946540550828"
+                sample_res = %{
+                  "code" => "SUCCESS",
+                  "item" => %{
+                    "checkoutId" => "1715311946540550828",
+                    "url" =>
+                      "https://pg.revenuemonster.my/v3/checkout?checkoutId=1715311946540550828"
+                  }
                 }
-              }
 
-              case res["code"] do
-                "SUCCESS" ->
-                  Settings.update_sale(s, %{payment_ref: res["item"]["checkoutId"]})
-                  res["item"]["url"]
-              end
+                case res["code"] do
+                  "SUCCESS" ->
+                    Settings.update_sale(s, %{payment_ref: res["item"]["checkoutId"]})
+                    res["item"]["url"]
+                end
+            end
           end
 
         "get_outlet" ->
@@ -474,6 +480,10 @@ defmodule BlogEngineWeb.ApiController do
     json(conn, %{status: "ok"})
   end
 
+  @doc """
+    
+    BlogEngineWeb.ApiController.ipay88_payment(%Plug.Conn{}, p)
+  """
   def ipay88_payment(conn, params) do
     IO.inspect(params)
 
@@ -489,7 +499,7 @@ defmodule BlogEngineWeb.ApiController do
       "MerchantCode" => "M15137",
       "PaymentId" => "888",
       "RecurringRefno" => "",
-      "RefNo" => "TST261",
+      "RefNo" => "TST260",
       "Remark" => "test",
       "S_bankname" => "",
       "S_country" => "",
@@ -538,23 +548,34 @@ defmodule BlogEngineWeb.ApiController do
             device
           end
 
-        item = sale.sales_items |> List.first() |> Map.get(:item) |> IO.inspect()
+        items = sale.sales_items |> IO.inspect()
 
         item =
-          if item == nil do
-            amount =
-              sale.sales_items
-              |> List.first()
-              |> Map.get(:item_name)
-              |> String.replace("User fill ", "")
-              |> Integer.parse()
-              |> elem(0)
+          if items != [] do
+            item = items |> List.first() |> Map.get(:item)
+
+            item =
+              if item == nil do
+                amount =
+                  sale.sales_items
+                  |> List.first()
+                  |> Map.get(:item_name)
+                  |> String.replace("User fill ", "")
+                  |> Integer.parse()
+                  |> elem(0)
+
+                reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
+
+                %{reps: reps, delay: 0.2, name: "User fill #{amount}"}
+              else
+                item
+              end
+          else
+            amount = sale.amount
 
             reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
 
             %{reps: reps, delay: 0.2, name: "User fill #{amount}"}
-          else
-            item
           end
 
         BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{

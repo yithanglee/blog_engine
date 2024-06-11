@@ -1211,7 +1211,7 @@ defmodule BlogEngine.Settings do
   @doc """
   BlogEngine.Settings.get_call_counts_with_empty_minutes(7, )
   """
-  def get_call_counts_with_empty_minutes(device_id) do
+  def get_call_counts_with_empty_minutes(device_id, limit \\ "") do
     {y, m, d} = Date.utc_today() |> Date.to_erl()
 
     {:ok, start_datetime} = NaiveDateTime.from_erl({{y, m, d}, {0, 0, 0}}) |> IO.inspect()
@@ -1224,7 +1224,7 @@ defmodule BlogEngine.Settings do
       FROM
         device_time_logs
       WHERE
-        device_id = $1 AND inserted_at BETWEEN $2 AND $3
+        device_id = $1 AND inserted_at BETWEEN $2 AND $3 
       UNION ALL
       SELECT
         minute + interval '1 minute'
@@ -1237,7 +1237,7 @@ defmodule BlogEngine.Settings do
           FROM
             device_time_logs
           WHERE
-            device_id = $1 AND inserted_at BETWEEN $2 AND $3
+            device_id = $1 AND inserted_at BETWEEN $2 AND $3 
         )
     )
     SELECT
@@ -1249,7 +1249,7 @@ defmodule BlogEngine.Settings do
     GROUP BY
       m.minute
     ORDER BY
-      m.minute DESC;
+      m.minute DESC #{limit};
     """
 
     Repo.query!(query, [device_id, start_datetime, end_datetime])
@@ -1263,9 +1263,19 @@ defmodule BlogEngine.Settings do
 
     Repo.delete_all(from(si in SalesItem, where: si.id in ^ids))
 
-    res =
-      Repo.delete_all(
-        from(s in Sale, where: s.status == ^:pending_payment, preload: [:sales_items])
-      )
+    res = Repo.delete_all(from(s in Sale, where: s.status == ^:pending_payment))
+  end
+
+  def check_last_mins(device_id) do
+    res = BlogEngine.Settings.get_call_counts_with_empty_minutes(device_id, "LIMIT 30")
+
+    case res |> hd do
+      [last_time, count] ->
+        IO.inspect(count)
+        DateTime.utc_now() |> DateTime.diff(last_time |> DateTime.from_naive!("GMT+0"))
+
+      _ ->
+        999
+    end
   end
 end
