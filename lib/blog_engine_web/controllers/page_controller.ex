@@ -409,6 +409,12 @@ defmodule BlogEngineWeb.PageController do
 
   def thank_you(conn, params) do
     IO.inspect("it's reloading!")
+    merchant_code = Map.get(params, "MerchantCode")
+
+    if merchant_code != nil do
+      BlogEngineWeb.ApiController.ipay88_payment(conn, params)
+    end
+
     render(conn, "thank_you.html", params)
   end
 end

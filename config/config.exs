@@ -55,6 +55,10 @@ config :blue_potion,
   }
 
 config :blog_engine, BlogEngine.Scheduler, jobs: []
+# Application.get_env(:blog_engine, :cloridge)[:key]
+config :blog_engine, :cloridge,
+  key: System.get_env("CLORIDGE_KEY"),
+  secret: System.get_env("CLORIDGE_SECRET")
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

@@ -1,10 +1,9 @@
 defmodule Ipay88 do
   import SweetXml
-  @merchant_code "M15137"
-  @merchant_key "Vx7AbhyzGK"
+
   @gateway_url "https://payment.ipay88.com.my/ePayment/WebService/MHGatewayService/GatewayService.svc"
   @soap_action "https://www.mobile88.com/IGatewayService/EntryPageFunctionality"
-
+  @url "https://payment.ipay88.com.my/epayment/entry.asp"
   def generate_signature(
         merchant_key,
         merchant_code,
@@ -16,14 +15,100 @@ defmodule Ipay88 do
         device_id
       ) do
     data =
-      @merchant_key <>
-        @merchant_code <>
+      merchant_key <>
+        merchant_code <>
         ref_no <> amount <> currency <> x_field1 <> barcode_no <> device_id
 
     IO.inspect(data)
 
     :crypto.hash(:sha256, data)
     |> Base.encode16(case: :lower)
+  end
+
+  def send_payment_request_test(amount, merchant_key, merchant_code, ref_no) do
+    pre_amt = (amount * 100.00) |> :erlang.trunc()
+
+    signature =
+      generate_signature(
+        merchant_key,
+        merchant_code,
+        ref_no,
+        (100_000 + pre_amt)
+        |> Integer.to_string()
+        |> String.split("")
+        |> Enum.reject(&(&1 == ""))
+        |> List.pop_at(0)
+        |> elem(1)
+        |> Enum.join("")
+        |> String.to_integer()
+        |> Integer.to_string(),
+        "MYR",
+        "",
+        "",
+        ""
+      )
+      |> IO.inspect()
+  end
+
+  def send_payment_request(amount, merchant_key, merchant_code, ref_no) do
+    pre_amt = (amount * 100.00) |> :erlang.trunc()
+
+    signature =
+      generate_signature(
+        merchant_key,
+        merchant_code,
+        ref_no,
+        (100_000 + pre_amt)
+        |> Integer.to_string()
+        |> String.split("")
+        |> Enum.reject(&(&1 == ""))
+        |> List.pop_at(0)
+        |> elem(1)
+        |> Enum.join("")
+        |> String.to_integer()
+        |> Integer.to_string(),
+        "MYR",
+        "",
+        "",
+        ""
+      )
+      |> IO.inspect()
+
+    params = %{
+      "MerchantCode" => merchant_code,
+      "PaymentId" => "15",
+      "RefNo" => ref_no,
+      "Amount" => "#{amount}",
+      "Currency" => "MYR",
+      "ProdDesc" => "Photo Print",
+      "UserName" => "John Tan",
+      "UserEmail" => "john@hotmail.com",
+      "UserContact" => "0126500100",
+      "Remark" => "",
+      "Lang" => "UTF-8",
+      "SignatureType" => "SHA256",
+      "Signature" => signature,
+      "ResponseURL" => "https://blog.damienslab.com/thank_you",
+      "BackendURL" => "https://blog.damienslab.com/api/payment/ipay88"
+    }
+
+    headers = [
+      {"Content-Type", "application/x-www-form-urlencoded"},
+      {"Origin", "https://netculture.co"}
+    ]
+
+    case HTTPoison.post(@url, URI.encode_query(params), headers) |> IO.inspect() do
+      {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
+        IO.puts("Request successful")
+        IO.inspect(body)
+        IO.puts(body)
+
+      {:ok, %HTTPoison.Response{status_code: status_code}} ->
+        IO.puts("Request failed with status code: #{status_code}")
+
+      {:error, %HTTPoison.Error{reason: reason}} ->
+        IO.puts("Request failed with reason: #{inspect(reason)}")
+    end
   end
 
   def construct_soap_request(
@@ -45,13 +130,15 @@ defmodule Ipay88 do
         merchant_key,
         merchant_code,
         ref_no,
-        (1000 + pre_amt)
+        (100_000 + pre_amt)
         |> Integer.to_string()
         |> String.split("")
         |> Enum.reject(&(&1 == ""))
         |> List.pop_at(0)
         |> elem(1)
-        |> Enum.join(""),
+        |> Enum.join("")
+        |> String.to_integer()
+        |> Integer.to_string(),
         currency,
         "",
         "",
@@ -71,7 +158,7 @@ defmodule Ipay88 do
             <mhp:BackendURL>#{callback}/api/payment/ipay88</mhp:BackendURL>
             <mhp:BarcodeNo></mhp:BarcodeNo>
             <mhp:Currency>#{currency}</mhp:Currency>
-            <mhp:MerchantCode>#{@merchant_code}</mhp:MerchantCode>
+            <mhp:MerchantCode>#{merchant_code}</mhp:MerchantCode>
             <mhp:PaymentId>888</mhp:PaymentId>
             <mhp:ProdDesc>#{prod_desc}</mhp:ProdDesc>
             <mhp:RefNo>#{ref_no}</mhp:RefNo>

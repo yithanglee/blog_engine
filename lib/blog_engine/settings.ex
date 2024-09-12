@@ -214,7 +214,17 @@ defmodule BlogEngine.Settings do
   end
 
   def create_device(params \\ %{}) do
-    Device.changeset(%Device{}, params) |> Repo.insert() |> IO.inspect()
+    res = Device.changeset(%Device{}, params) |> Repo.insert() |> IO.inspect()
+
+    case res do
+      {:ok, d} ->
+        CloridgeAPI.initial_setup(d.cloridge_device_uid)
+
+      _ ->
+        nil
+    end
+
+    res
   end
 
   def update_device(model, params) do
@@ -223,6 +233,12 @@ defmodule BlogEngine.Settings do
 
     bool_key = "record_wifi_time"
     params = append_bool_key(params, bool_key)
+
+    bool_key = "is_cloridge"
+    params = append_bool_key(params, bool_key)
+
+    bool_key = "skip_first"
+    params = append_bool_key(params, bool_key) |> IO.inspect()
 
     Device.changeset(model, params) |> Repo.update() |> IO.inspect()
   end
@@ -244,14 +260,16 @@ defmodule BlogEngine.Settings do
   def create_slide(params \\ %{}) do
     bool_key = "is_show"
     params = append_bool_key(params, bool_key)
-
+    bool_key = "is_banner"
+    params = append_bool_key(params, bool_key)
     Slide.changeset(%Slide{}, params) |> Repo.insert() |> IO.inspect()
   end
 
   def update_slide(model, params) do
     bool_key = "is_show"
     params = append_bool_key(params, bool_key)
-
+    bool_key = "is_banner"
+    params = append_bool_key(params, bool_key)
     Slide.changeset(model, params) |> Repo.update() |> IO.inspect()
   end
 
@@ -309,8 +327,14 @@ defmodule BlogEngine.Settings do
 
     bool_key = "can_post"
     params = append_bool_key(params, bool_key)
+    name = params["name"]
+    check = Repo.all(from(ap in AppRoute, where: ap.name == ^name))
 
-    AppRoute.changeset(%AppRoute{}, params) |> Repo.insert() |> IO.inspect()
+    if check == [] do
+      cg = AppRoute.changeset(%AppRoute{}, params) |> Repo.insert() |> IO.inspect()
+    else
+      {:ok, List.first(check)}
+    end
   end
 
   def update_app_route(model, params) do
@@ -1266,16 +1290,143 @@ defmodule BlogEngine.Settings do
     res = Repo.delete_all(from(s in Sale, where: s.status == ^:pending_payment))
   end
 
-  def check_last_mins(device_id) do
-    res = BlogEngine.Settings.get_call_counts_with_empty_minutes(device_id, "LIMIT 30")
+  def check_last_mins(device_id, skip_check \\ false) do
+    if skip_check do
+      0
+    else
+      res = BlogEngine.Settings.get_call_counts_with_empty_minutes(device_id, "LIMIT 30")
 
-    case res |> hd do
-      [last_time, count] ->
-        IO.inspect(count)
-        DateTime.utc_now() |> DateTime.diff(last_time |> DateTime.from_naive!("GMT+0"))
+      case res |> hd do
+        [nil, count] ->
+          999
+
+        [last_time, count] ->
+          IO.inspect(count)
+          DateTime.utc_now() |> DateTime.diff(last_time |> DateTime.from_naive!("GMT+0"))
+
+        _ ->
+          999
+      end
+    end
+  end
+
+  def copy_items_from_outlet(from_outlet_id, to_outlet_id) do
+    items =
+      Repo.all(from(i in Item, where: i.outlet_id == ^from_outlet_id))
+      |> Enum.map(
+        &(&1
+          |> BluePotion.sanitize_struct()
+          |> Map.delete(:id)
+          |> Map.put(:outlet_id, to_outlet_id)
+          |> create_item())
+      )
+  end
+
+  alias BlogEngine.Settings.Product
+
+  def list_products() do
+    Repo.all(from(p in Product, preload: [:brand, :category]))
+  end
+
+  def get_product!(id) do
+    Repo.get!(Product, id)
+  end
+
+  def create_product(params \\ %{}) do
+    Product.changeset(%Product{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_product(model, params) do
+    Product.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_product(%Product{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.Brand
+
+  def list_brands() do
+    Repo.all(Brand)
+  end
+
+  def get_brand!(id) do
+    Repo.get!(Brand, id)
+  end
+
+  def create_brand(params \\ %{}) do
+    Brand.changeset(%Brand{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_brand(model, params) do
+    Brand.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_brand(%Brand{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.Page
+
+  def list_pages() do
+    Repo.all(from(p in Page, order_by: [desc: p.sorting_index]))
+  end
+
+  def get_page!(id) do
+    Repo.get!(Page, id)
+  end
+
+  def create_page(params \\ %{}) do
+    Page.changeset(%Page{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_page(model, params) do
+    res = Page.changeset(model, params) |> Repo.update() |> IO.inspect()
+
+    case HTTPoison.get(
+           "#{Application.get_env(:blog_engine, :mbos_api)}/blog_updates",
+           [{"Content-Type", "application/json"}]
+         ) do
+      {:ok,
+       %HTTPoison.Response{
+         body: body
+       } = _res} ->
+        body |> IO.puts()
 
       _ ->
-        999
+        nil
     end
+
+    res
+  end
+
+  def delete_page(%Page{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.Section
+
+  def list_sections() do
+    Repo.all(Section)
+  end
+
+  def get_section!(id) do
+    Repo.get!(Section, id)
+  end
+
+  def get_section_by_name(name) do
+    Repo.get_by(Section, name: name)
+  end
+
+  def create_section(params \\ %{}) do
+    Section.changeset(%Section{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_section(model, params) do
+    Section.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_section(%Section{} = model) do
+    Repo.delete(model)
   end
 end

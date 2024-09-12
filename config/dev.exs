@@ -75,6 +75,7 @@ config :blog_engine, url: System.get_env("ENDPOINT")
 #   client_secret: System.get_env("RM_CLIENT_SECRET"),
 #   private_key: System.get_env("RM_CLIENT_PRIVATE_KEY"),
 #   cert_location: "/priv/cert/private_key.pem"
+config :blog_engine, :mbos_api, System.get_env("MBOS_API")
 config :blog_engine, :ipay88, callback: System.get_env("IPAY88_CALLBACK")
 
 config :blog_engine, :revenue_monster,

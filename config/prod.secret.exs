@@ -40,7 +40,7 @@ config :blog_engine, BlogEngineWeb.Endpoint,
 # Then you can assemble a release by calling `mix release`.
 # See `mix help release` for more information.
 config :blog_engine, BlogEngineWeb.Endpoint, server: true
-
+config :blog_engine, :mbos_api, System.get_env("MBOS_API_PROD")
 config :blog_engine, url: System.get_env("ENDPOINT_PROD")
 
 config :blog_engine, :billplz,

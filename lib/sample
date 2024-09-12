@@ -1,0 +1,69 @@
+RM 50
+Received raw data: b'\x81D'
+Received raw data: b'\x10'
+
+
+RM 20
+Received raw data: b'\x81F'
+Received raw data: b'\x10'
+~
+~
+RM 10
+Received raw data: b'\x81C'
+Received raw data: b'\x10'
+
+
+
+RM 5
+Received raw data: b'\x81B'
+Received raw data: b'\x10'
+~
+~
+RM 1
+Received raw data: b'\x81@'
+Received raw data: b'\x10'
+~
+~
+
+
+
+
+
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+Received raw data: b'\x02'
+~
+~
+~
+~
+Received raw data: b'^>'
+~
+~
+
+
+
+7 bit
+rm 1
+
+b'\x01\x01\x7f\x10'
+
+
+
+~
+~
+Received raw data: b'\x01\x01\x7f'
+~
+~
+~
+~
+Received raw data: b'\x10'

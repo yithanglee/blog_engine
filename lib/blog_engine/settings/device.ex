@@ -7,11 +7,17 @@ defmodule BlogEngine.Settings.Device do
     field(:is_suspended, :boolean, default: false)
     field(:name, :string)
 
+    field(:is_cloridge, :boolean, default: false)
+    field(:cloridge_device_uid, :string)
+
+    field(:format, :string, default: "pwm")
     field(:record_wifi_time, :boolean, default: false)
     field(:short_desc, :string)
     belongs_to(:outlet, BlogEngine.Settings.Outlet)
     field(:default_io_pin, :integer, default: 0)
     belongs_to(:executor_board, BlogEngine.Settings.Device, foreign_key: :executor_board_id)
+
+    field(:skip_first, :boolean, default: false)
     timestamps()
   end
 
@@ -19,6 +25,10 @@ defmodule BlogEngine.Settings.Device do
   def changeset(device, attrs) do
     device
     |> cast(attrs, [
+      :is_cloridge,
+      :cloridge_device_uid,
+      :format,
+      :skip_first,
       :record_wifi_time,
       :executor_board_id,
       :outlet_id,

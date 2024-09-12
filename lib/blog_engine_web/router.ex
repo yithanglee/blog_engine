@@ -63,6 +63,15 @@ defmodule BlogEngineWeb.Router do
     post("/webhook", ApiController, :ngrok_post)
   end
 
+  scope "/cloridge", BlogEngineWeb do
+    pipe_through :svt_api
+    get "/stream", ApiController, :stream_get
+    options("/:webhook", ApiController, :get)
+
+    get "/webhook", ApiController, :get
+    post "/webhook", ApiController, :post
+  end
+
   scope "/svt_api", BlogEngineWeb do
     pipe_through :svt_api
     get "/stream", ApiController, :stream_get
@@ -117,6 +126,7 @@ defmodule BlogEngineWeb.Router do
     get "/pdf", PageController, :pdf
     get "/log2in", PageController, :login
     post "/auth", PageController, :authenticate
+    post "/thank_you", PageController, :thank_you
     get "/thank_you", PageController, :thank_you
     get "/*path", PageController, :index
   end

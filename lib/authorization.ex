@@ -67,7 +67,8 @@ defmodule BlogEngine.ApiAuthorization do
           "customer_topup",
           "link_register",
           "checkout",
-          "checkout_by_amount"
+          "checkout_by_amount",
+          "thank_you"
         ] ->
           conn
 

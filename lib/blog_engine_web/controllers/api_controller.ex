@@ -168,15 +168,49 @@ defmodule BlogEngineWeb.ApiController do
           timestamp = DateTime.utc_now() |> DateTime.to_unix()
           %{time: timestamp}
 
-        "pay_service" ->
+        "pay_service_test" ->
           outlet_item = Settings.get_item!(params["id"]) |> BluePotion.sanitize_struct()
           device = Settings.get_device_by_name(params["device"])
 
+          {:ok, s} =
+            Settings.create_sale(%{
+              sales_date: Date.utc_today(),
+              outlet_id: outlet_item.outlet.id,
+              device_id: device.id,
+              amount: outlet_item.price,
+              status: :pending_payment,
+              uid: Ecto.UUID.generate()
+            })
+
+          Settings.create_sales_item(%{
+            item_id: outlet_item.id,
+            sales_id: s.id,
+            item_amount: outlet_item.price,
+            item_name: outlet_item.name,
+            qty: 1,
+            subtotal: outlet_item.price * 1
+          })
+
+          sig =
+            Ipay88.send_payment_request_test(
+              1.00,
+              outlet_item.outlet.mkey,
+              outlet_item.outlet.mcode,
+              "#{Application.get_env(:blog_engine, :revenue_monster)[:prefix]}#{s.id}"
+            )
+
+          [sig, "#{Application.get_env(:blog_engine, :revenue_monster)[:prefix]}#{s.id}"]
+
+        "pay_service" ->
+          outlet_item = Settings.get_item!(params["id"]) |> BluePotion.sanitize_struct()
+          device = Settings.get_device_by_name(params["device"]) |> IO.inspect()
+
           # todo: check the connection health, last 10 seconds was there any count...
-
-          res = BlogEngine.Settings.check_last_mins(device.id)
-
-          if res <= 60 do
+          with true <- device != nil,
+               res <-
+                 BlogEngine.Settings.check_last_mins(device.id, device.is_cloridge)
+                 |> IO.inspect(),
+               true <- res <= 60 do
             {:ok, s} =
               Settings.create_sale(%{
                 sales_date: Date.utc_today(),
@@ -197,6 +231,28 @@ defmodule BlogEngineWeb.ApiController do
             })
 
             case outlet_item.outlet.payment_gateway do
+              "ipay88" ->
+                # Ipay88.send_payment_request(
+                #   1.00,
+                #   outlet_item.outlet.mkey,
+                #   outlet_item.outlet.mcode,
+                #   "#{Application.get_env(:blog_engine, :revenue_monster)[:prefix]}#{s.id}"
+                # )
+
+                sig =
+                  Ipay88.send_payment_request_test(
+                    1.00,
+                    outlet_item.outlet.mkey,
+                    outlet_item.outlet.mcode,
+                    "#{Application.get_env(:blog_engine, :revenue_monster)[:prefix]}#{s.id}"
+                  )
+
+                [
+                  sig,
+                  "#{Application.get_env(:blog_engine, :revenue_monster)[:prefix]}#{s.id}",
+                  outlet_item.outlet.mcode
+                ]
+
               _ ->
                 res =
                   RevenueMonster.pay(
@@ -221,6 +277,9 @@ defmodule BlogEngineWeb.ApiController do
                     res["item"]["url"]
                 end
             end
+          else
+            _ ->
+              nil
           end
 
         "get_outlet" ->
@@ -236,6 +295,14 @@ defmodule BlogEngineWeb.ApiController do
               |> Map.take([:id, :name, :price, :image_url, :short_name2, :short_name1]))
           )
 
+        "get_contact" ->
+          Settings.get_section_by_name("Top Nav Contact")
+          |> BluePotion.sanitize_struct()
+
+        "get_pages" ->
+          Settings.list_pages()
+          |> Enum.map(&(&1 |> BluePotion.sanitize_struct()))
+
         "get_items" ->
           Settings.list_items_by_subdomain(params["code"])
           |> Enum.map(
@@ -243,6 +310,29 @@ defmodule BlogEngineWeb.ApiController do
               |> BluePotion.sanitize_struct()
               |> Map.take([:id, :name, :price, :image_url, :short_name2, :short_name1]))
           )
+
+        "get_sections" ->
+          Settings.list_sections()
+          |> Enum.map(&(&1 |> BluePotion.sanitize_struct()))
+          |> IO.inspect()
+
+        "get_banners" ->
+          Settings.list_slides(true)
+          |> Enum.map(&(&1 |> BluePotion.sanitize_struct()))
+
+        "get_product" ->
+          Settings.get_product!(params["id"]) |> BluePotion.sanitize_struct()
+
+        "get_products" ->
+          products =
+            Settings.list_products()
+            |> Enum.map(&(&1 |> BluePotion.sanitize_struct()))
+
+          brands = products |> Enum.group_by(& &1.brand) |> Map.keys()
+
+          categories = products |> Enum.group_by(& &1.category) |> Map.keys()
+          products = products |> Enum.map(&(&1 |> Map.delete(:brand) |> Map.delete(:category)))
+          %{categories: categories, brands: brands, products: products}
 
         "blog" ->
           b = Settings.get_blog!(params["id"])
@@ -398,13 +488,34 @@ defmodule BlogEngineWeb.ApiController do
         device = sale.device
         item = sale.sales_items |> List.first() |> Map.get(:item) |> IO.inspect()
 
-        BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
-          "action" => "start",
-          "reps" => item.reps,
-          "delay" => item.delay,
-          "uuid" => uuid,
-          "pin" => device.default_io_pin
-        })
+        reps =
+          if device.skip_first do
+            item.reps - 1
+          else
+            item.reps
+          end
+
+        {delay, reps} =
+          if reps == 0 do
+            {0.01, 1}
+          else
+            {item.delay, reps}
+          end
+
+        format = device.format
+
+        if device.is_cloridge do
+          CloridgeAPI.send_message(reps, device.cloridge_device_uid)
+        else
+          BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
+            "action" => "start",
+            "format" => format,
+            "reps" => reps,
+            "delay" => delay,
+            "uuid" => uuid,
+            "pin" => device.default_io_pin
+          })
+        end
 
         BlogEngine.Settings.create_device_log(%{
           device_id: device.id,
@@ -529,87 +640,110 @@ defmodule BlogEngineWeb.ApiController do
     outlet = BlogEngine.Settings.get_outlet!(sale.outlet_id)
     status = Map.get(params, "Status") |> IO.inspect()
 
-    case status do
-      "1" ->
-        nil
+    if sale.status != :complete do
+      case status do
+        "1" ->
+          nil
 
-        uuid = Ecto.UUID.generate()
+          uuid = Ecto.UUID.generate()
 
-        device = sale.device
+          device = sale.device
 
-        device = device |> Repo.preload(:executor_board)
+          device = device |> Repo.preload(:executor_board)
 
-        executor_board = device.executor_board
+          executor_board = device.executor_board
 
-        device =
-          if executor_board != nil do
-            executor_board
+          device =
+            if executor_board != nil do
+              executor_board
+            else
+              device
+            end
+
+          items = sale.sales_items |> IO.inspect()
+
+          item =
+            if items != [] do
+              item = items |> List.first() |> Map.get(:item)
+
+              item =
+                if item == nil do
+                  amount =
+                    sale.sales_items
+                    |> List.first()
+                    |> Map.get(:item_name)
+                    |> String.replace("User fill ", "")
+                    |> Integer.parse()
+                    |> elem(0)
+
+                  reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
+
+                  %{reps: reps, delay: 0.5, name: "User fill #{amount}"}
+                else
+                  item
+                end
+            else
+              amount = sale.amount
+
+              reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
+
+              %{reps: reps, delay: 0.5, name: "User fill #{amount}"}
+            end
+
+          reps =
+            if device.skip_first do
+              item.reps - 1
+            else
+              item.reps
+            end
+
+          {delay, reps} =
+            if reps == 0 do
+              {0.01, 1}
+            else
+              {item.delay, reps}
+            end
+
+          format = device.format
+
+          if device.is_cloridge do
+            CloridgeAPI.send_message(reps, device.cloridge_device_uid)
           else
-            device
-          end
-
-        items = sale.sales_items |> IO.inspect()
-
-        item =
-          if items != [] do
-            item = items |> List.first() |> Map.get(:item)
-
-            item =
-              if item == nil do
-                amount =
-                  sale.sales_items
-                  |> List.first()
-                  |> Map.get(:item_name)
-                  |> String.replace("User fill ", "")
-                  |> Integer.parse()
-                  |> elem(0)
-
-                reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
-
-                %{reps: reps, delay: 0.2, name: "User fill #{amount}"}
-              else
-                item
-              end
-          else
-            amount = sale.amount
-
-            reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
-
-            %{reps: reps, delay: 0.2, name: "User fill #{amount}"}
-          end
-
-        BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
-          "action" => "start",
-          "reps" => item.reps,
-          "delay" => item.delay,
-          "uuid" => uuid,
-          "pin" => device.default_io_pin
-        })
-
-        BlogEngine.Settings.create_device_log(%{
-          device_id: device.id,
-          uuid: uuid,
-          job_content:
-            Jason.encode!(%{
+            BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
               "action" => "start",
-              "reps" => item.reps,
-              "delay" => item.delay,
+              "format" => format,
+              "reps" => reps,
+              "delay" => delay,
               "uuid" => uuid,
               "pin" => device.default_io_pin
-            }),
-          remarks:
-            "sales id:#{sale.id} start #{item.name} with reps: #{item.reps} delay: #{item.delay} on pin #{device.default_io_pin}"
-        })
-        |> IO.inspect()
+            })
+          end
 
-        BlogEngine.Settings.update_sale(sale, %{
-          payment_webhook: params |> Jason.encode!(),
-          status: :complete
-        })
-        |> IO.inspect()
+          BlogEngine.Settings.create_device_log(%{
+            device_id: device.id,
+            uuid: uuid,
+            job_content:
+              Jason.encode!(%{
+                "action" => "start",
+                "reps" => item.reps,
+                "delay" => item.delay,
+                "uuid" => uuid,
+                "pin" => device.default_io_pin
+              }),
+            remarks:
+              "sales id:#{sale.id} start #{item.name} with reps: #{item.reps} delay: #{item.delay} on pin #{device.default_io_pin}"
+          })
+          |> IO.inspect()
 
-      _ ->
-        nil
+          BlogEngine.Settings.update_sale(sale, %{
+            payment_webhook: params |> Jason.encode!(),
+            status: :complete
+          })
+          |> IO.inspect()
+
+        _ ->
+          nil
+      end
     end
 
     json(conn, %{status: "ok"})
@@ -746,13 +880,34 @@ defmodule BlogEngineWeb.ApiController do
 
           device = BlogEngine.Settings.get_device_by_name(params["name"])
 
-          BlogEngineWeb.Endpoint.broadcast("user:#{params["name"]}", "start_pwm", %{
-            "action" => params["action"],
-            "reps" => params["value"],
-            "delay" => params["delay"],
-            "uuid" => uuid,
-            "pin" => device.default_io_pin
-          })
+          reps =
+            if device.skip_first do
+              params["value"] - 1
+            else
+              params["value"]
+            end
+
+          {delay, reps} =
+            if reps == 0 do
+              {0.01, 1}
+            else
+              {params["delay"], reps}
+            end
+
+          format = params["format"] || "pwm"
+
+          if device.is_cloridge do
+            CloridgeAPI.send_message(reps, device.cloridge_device_uid)
+          else
+            BlogEngineWeb.Endpoint.broadcast("user:#{params["name"]}", "start_pwm", %{
+              "action" => params["action"],
+              "format" => format,
+              "reps" => reps,
+              "delay" => delay,
+              "uuid" => uuid,
+              "pin" => device.default_io_pin
+            })
+          end
 
           BlogEngine.Settings.create_device_log(%{
             device_id: device.id,
@@ -765,7 +920,8 @@ defmodule BlogEngineWeb.ApiController do
                 "uuid" => uuid,
                 "pin" => device.default_io_pin
               }),
-            remarks: "manual start #{params["item_name"]} on pin #{device.default_io_pin}"
+            remarks:
+              "manual start #{format} #{params["item_name"]} on pin #{device.default_io_pin}"
           })
 
           %{status: "ok"}
