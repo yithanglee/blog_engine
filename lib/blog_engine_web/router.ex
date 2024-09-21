@@ -40,6 +40,10 @@ defmodule BlogEngineWeb.Router do
     plug(BlogEngine.ApiAuthorization)
   end
 
+  pipeline :browser_blank do
+    plug :accepts, ["html"]
+  end
+
   pipeline :api do
     plug :accepts, ["json"]
     # plug :fetch_session
@@ -54,6 +58,12 @@ defmodule BlogEngineWeb.Router do
       ]
 
     plug(BlogEngine.ApiAuthorization)
+  end
+
+  scope "/api", BlogEngineWeb do
+    pipe_through :browser_blank
+
+    post "/notification/razer", PageController, :notification
   end
 
   scope "/ngrok", BlogEngineWeb do
@@ -88,7 +98,7 @@ defmodule BlogEngineWeb.Router do
 
   scope "/api", BlogEngineWeb do
     pipe_through :plain_api
-
+    post "/payment/razer", ApiController, :razer_payment
     post "/payment/billplz", ApiController, :payment
     post "/payment/ipay88", ApiController, :ipay88_payment
   end
@@ -115,6 +125,13 @@ defmodule BlogEngineWeb.Router do
   scope "/html/:lang", BlogEngineWeb do
     pipe_through [:browser]
     get "/*path", PageController, :html
+  end
+
+  scope "/", BlogEngineWeb do
+    pipe_through :browser_blank
+
+    post "/test_razer", PageController, :razer_payment
+    post "/thank_you", PageController, :thank_you
   end
 
   scope "/", BlogEngineWeb do

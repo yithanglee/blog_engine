@@ -9,6 +9,310 @@ defmodule BlogEngineWeb.PageController do
     render(conn, "override.html")
   end
 
+  def thank_you(conn, params) do
+    IO.inspect(params)
+
+    %{
+      "amount" => "2.50",
+      "appcode" => "",
+      "channel" => "FPX_MB2U",
+      "currency" => "RM",
+      "domain" => "MGhaho2u",
+      "error_code" => "",
+      "error_desc" => "",
+      "extraP" => "{\"fpx_buyer_name\":\"LEE%20YIT%20HANG\",\"fpx_txn_id\":\"2403170834530847\"}",
+      "orderid" => "HAHOTOPUP42",
+      "paydate" => "2024-03-17 08:34:51",
+      "skey" => "87a101336941e8a097cc03d19e14a9e2",
+      "status" => "00",
+      "tranID" => "2065317565"
+    }
+
+    id =
+      params["orderid"]
+      |> String.replace(Application.get_env(:blog_engine, :revenue_monster)[:prefix], "")
+
+    sales = BlogEngine.Settings.get_sale!(id)
+
+    with true <- params["status"] == "00",
+         true <- sales != nil do
+      sale = sales
+      outlet = sales.outlet
+      device = sales.device
+
+      uuid = Ecto.UUID.generate()
+
+      device = device |> BlogEngine.Repo.preload(:executor_board)
+
+      executor_board = device.executor_board
+
+      device =
+        if executor_board != nil do
+          executor_board
+        else
+          device
+        end
+
+      items = sale.sales_items |> IO.inspect()
+
+      item =
+        if items != [] do
+          item = items |> List.first() |> Map.get(:item)
+
+          item =
+            if item == nil do
+              amount =
+                sale.sales_items
+                |> List.first()
+                |> Map.get(:item_name)
+                |> String.replace("User fill ", "")
+                |> Integer.parse()
+                |> elem(0)
+
+              reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
+
+              %{reps: reps, delay: 0.5, name: "User fill #{amount}"}
+            else
+              item
+            end
+        else
+          amount = sale.amount
+
+          reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
+
+          %{reps: reps, delay: 0.5, name: "User fill #{amount}"}
+        end
+
+      reps =
+        if device.skip_first do
+          item.reps - 1
+        else
+          item.reps
+        end
+
+      {delay, reps} =
+        if reps == 0 do
+          {0.01, 1}
+        else
+          {item.delay, reps}
+        end
+
+      format = device.format
+
+      if device.is_cloridge do
+        CloridgeAPI.send_message(reps, device.cloridge_device_uid)
+      else
+        BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
+          "action" => "start",
+          "format" => format,
+          "reps" => reps,
+          "delay" => delay,
+          "uuid" => uuid,
+          "pin" => device.default_io_pin
+        })
+      end
+
+      BlogEngine.Settings.create_device_log(%{
+        device_id: device.id,
+        uuid: uuid,
+        job_content:
+          Jason.encode!(%{
+            "action" => "start",
+            "reps" => item.reps,
+            "delay" => item.delay,
+            "uuid" => uuid,
+            "pin" => device.default_io_pin
+          }),
+        remarks:
+          "sales id:#{sale.id} start #{item.name} with reps: #{item.reps} delay: #{item.delay} on pin #{device.default_io_pin}"
+      })
+      |> IO.inspect()
+
+      BlogEngine.Settings.update_sale(sale, %{
+        payment_webhook: params |> Jason.encode!(),
+        status: :complete
+      })
+      |> IO.inspect()
+    else
+      _ ->
+        %{status: "error"}
+    end
+
+    IO.inspect("it's thank you-ing!")
+    render(conn, "thank_you.html", params)
+  end
+
+  def razer_payment(conn, %{"chan" => chan, "amt" => amt, "ref_no" => ref} = params) do
+    id =
+      ref
+      |> String.replace(Application.get_env(:blog_engine, :revenue_monster)[:prefix], "")
+
+    sales = BlogEngine.Settings.get_sale!(id)
+
+    conn
+    |> redirect(
+      external: Razer.payment_page(chan, amt, ref, sales.outlet.mcode, sales.outlet.mkey)
+    )
+  end
+
+  def notification(conn, params) do
+    IO.inspect(params)
+
+    duitnow = %{
+      "amount" => "0.50",
+      "appcode" => "",
+      "channel" => "RPP_DuitNowQR-Offline_MP",
+      "currency" => "RM",
+      "domain" => "djtechplt_Dev",
+      "error_code" => "",
+      "error_desc" => "",
+      "extraP" =>
+        "{\"DbtrAgt\":\"MBBEMYKL\",\"DbtrAcct_Type\":\"SVGS\",\"TxnType\":\"DOMESTIC\",\"refundability\":\"true\",\"bank_issuer\":\"Maybank Berhad\",\"duitnowqr_indicator\":\"20240914MBBEMYKL030OQR71089433\"}",
+      "nbcb" => "2",
+      "orderid" => "DEMO637",
+      "paydate" => "2024-09-14 07:29:12",
+      "skey" => "510f3836a7422a75a683c97b6ce171ca",
+      "status" => "00",
+      "tranID" => "2390694614"
+    }
+
+    # get the device
+    # orderid will be device's identifier
+    online = %{
+      "amount" => "2.00",
+      "appcode" => "",
+      "channel" => "maybank2u",
+      "currency" => "RM",
+      "domain" => "djtechplt_Dev",
+      "error_code" => "FPX_1C",
+      "error_desc" => "Buyer Choose Cancel At Login Page",
+      "extraP" => "{\"fpx_txn_id\":\"2409212020160488\"}",
+      "nbcb" => "2",
+      "orderid" => "TST276",
+      "paydate" => "2024-09-21 20:20:15",
+      "skey" => "7b04708f6d610d9cdeed212e2b8b4ea9",
+      "status" => "11",
+      "tranID" => "2402348820"
+    }
+
+    if params["status"] == "00" do
+      # probably need to check if the online trx will reach here...
+
+      device = BlogEngine.Settings.get_device_by_short_name(params["orderid"])
+
+      amt =
+        case params["amount"] |> Float.parse() do
+          {amt, _suf} ->
+            if amt < 0 do
+              1.0
+            else
+              amt |> Float.floor()
+            end
+
+          _ ->
+            1.0
+        end
+
+      {:ok, sale, device, outlet} =
+        if device == nil do
+          id =
+            params["orderid"]
+            |> String.replace(Application.get_env(:blog_engine, :revenue_monster)[:prefix], "")
+
+          sales = BlogEngine.Settings.get_sale!(id)
+          {:ok, sales, sales.device, sales.outlet}
+        else
+          {:ok, sales} =
+            BlogEngine.Settings.create_sale(%{
+              uid: Ecto.UUID.generate(),
+              amount: amt,
+              outlet_id: device.outlet.id,
+              device_id: device.id,
+              payment_channel: "duitnowsqr",
+              sales_date: Date.utc_today()
+            })
+            |> IO.inspect()
+
+          outlet = device.outlet
+          {:ok, sales, device, outlet}
+        end
+
+      uuid = Ecto.UUID.generate()
+
+      device = device |> BlogEngine.Repo.preload(:executor_board)
+
+      executor_board = device.executor_board
+
+      device =
+        if executor_board != nil do
+          executor_board
+        else
+          device
+        end
+
+      # items = sale.sales_items |> IO.inspect()
+
+      amount = sale.amount
+
+      reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
+      item = %{reps: reps, delay: 0.5, name: "User fill #{amount}"}
+
+      reps =
+        if device.skip_first do
+          item.reps - 1
+        else
+          item.reps
+        end
+
+      {delay, reps} =
+        if reps == 0 do
+          {0.01, 1}
+        else
+          {item.delay, reps}
+        end
+
+      format = device.format
+
+      if device.is_cloridge do
+        CloridgeAPI.send_message(reps, device.cloridge_device_uid)
+      else
+        BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
+          "action" => "start",
+          "format" => format,
+          "reps" => reps,
+          "delay" => delay,
+          "uuid" => uuid,
+          "pin" => device.default_io_pin
+        })
+      end
+
+      BlogEngine.Settings.create_device_log(%{
+        device_id: device.id,
+        uuid: uuid,
+        job_content:
+          Jason.encode!(%{
+            "action" => "start",
+            "reps" => item.reps,
+            "delay" => item.delay,
+            "uuid" => uuid,
+            "pin" => device.default_io_pin
+          }),
+        remarks:
+          "sales id:#{sale.id} start #{item.name} with reps: #{item.reps} delay: #{item.delay} on pin #{device.default_io_pin}"
+      })
+      |> IO.inspect()
+
+      BlogEngine.Settings.update_sale(sale, %{
+        payment_webhook: params |> Jason.encode!(),
+        status: :complete
+      })
+      |> IO.inspect()
+    else
+    end
+
+    json(conn, %{})
+  end
+
   def index(conn, _params) do
     IO.inspect("it's reloading!")
     render(conn, "index.html")

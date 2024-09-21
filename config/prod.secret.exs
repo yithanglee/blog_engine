@@ -42,11 +42,17 @@ config :blog_engine, BlogEngineWeb.Endpoint,
 config :blog_engine, BlogEngineWeb.Endpoint, server: true
 config :blog_engine, :mbos_api, System.get_env("MBOS_API_PROD")
 config :blog_engine, url: System.get_env("ENDPOINT_PROD")
+config :blog_engine, release: :prod
 
 config :blog_engine, :billplz,
   key: System.get_env("BILLPLZ_API_KEY_PROD"),
   endpoint: System.get_env("BILLPLZ_API_ENDPOINT_PROD"),
   callback: System.get_env("BILLPLZ_API_CALLBACK_URL_PROD")
+
+config :blog_engine, :razer,
+  vkey: System.get_env("RAZER_VKEY_PROD"),
+  mid: System.get_env("RAZER_MID_PROD"),
+  endpoint: System.get_env("RAZER_ENDPOINT_PROD")
 
 config :blog_engine, BlogEngine.Mailer,
   adapter: Bamboo.SMTPAdapter,

@@ -11,7 +11,10 @@ defmodule BlogEngineWeb.Endpoint do
   ]
 
   socket "/socket", BlogEngineWeb.UserSocket,
-    websocket: true,
+    websocket: [
+      # Disable origin checking for WebSocket connections
+      check_origin: false
+    ],
     longpoll: false
 
   # Serve at "/" the static files from "priv/static" directory.

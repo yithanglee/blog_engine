@@ -30,6 +30,7 @@ defmodule BlogEngine.Settings.Sale do
 
     has_many(:sales_items, BlogEngine.Settings.SalesItem, foreign_key: :sales_id)
 
+    field(:payment_url, :string)
     field(:payment_channel, :string)
     field(:payment_ref, :string)
     field(:payment_webhook, :binary)
@@ -43,6 +44,7 @@ defmodule BlogEngine.Settings.Sale do
   def changeset(sale, attrs) do
     sale
     |> cast(attrs, [
+      :payment_url,
       :uid,
       :outlet_id,
       :device_id,

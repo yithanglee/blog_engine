@@ -230,7 +230,16 @@ defmodule BlogEngineWeb.ApiController do
               subtotal: outlet_item.price * 1
             })
 
+            # return url to make payment
             case outlet_item.outlet.payment_gateway do
+              "fiuu" ->
+                nil
+                chan = "FPX"
+                server_url = Application.get_env(:blog_engine, :url)
+
+                payment_url =
+                  "#{server_url}/test_razer?chan=#{chan}&amt=#{(outlet_item.price * 1) |> :erlang.float_to_binary(decimals: 2)}&ref_no=#{Application.get_env(:blog_engine, :revenue_monster)[:prefix]}#{s.id}"
+
               "ipay88" ->
                 # Ipay88.send_payment_request(
                 #   1.00,
@@ -457,6 +466,82 @@ defmodule BlogEngineWeb.ApiController do
         |> put_resp_content_type("application/json")
         |> send_resp(200, Jason.encode!(res))
     end
+  end
+
+  def razer_payment(conn, params) do
+    IO.inspect(params)
+
+    sample = %{
+      "amount" => "10.00",
+      "appcode" => "",
+      "channel" => "maybank2u",
+      "currency" => "RM",
+      "domain" => "SB_MGhaho2u",
+      "error_code" => "FPX_",
+      "error_desc" => "",
+      "nbcb" => "1",
+      "orderid" => "76",
+      "paydate" => "2024-03-16 14:09:48",
+      "skey" => "598323fe40714e5fa03b7d903da7df2e",
+      "status" => "11",
+      "tranID" => "30775069"
+    }
+
+    %{
+      "amount" => "10.00",
+      "appcode" => "",
+      "channel" => "maybank2u",
+      "currency" => "RM",
+      "domain" => "SB_MGhaho2u",
+      "error_code" => "",
+      "error_desc" => "",
+      "nbcb" => "1",
+      "orderid" => "TOPUP76",
+      "paydate" => "2024-03-16 14:11:49",
+      "skey" => "079b4431229d22f46f0ae3e50a2ebd75",
+      "status" => "00",
+      "tranID" => "30775070"
+    }
+
+    payment = Settings.get_payment_by_billplz_code(params["orderid"])
+
+    payment |> Settings.update_payment(%{webhook_details: Jason.encode!(params)})
+
+    with true <- params["status"] == "00",
+         true <- payment != nil,
+         true <- payment.sales != nil,
+         sales <- payment.sales,
+         {:ok, register_params} <- sales.registration_details |> Jason.decode() do
+      case Settings.register(register_params["user"], sales) do
+        {:ok, multi_res} ->
+          %{status: "ok", res: multi_res |> BluePotion.sanitize_struct()}
+
+        _ ->
+          %{status: "error"}
+      end
+    else
+      _ ->
+        case params["status"] do
+          "00" ->
+            with true <- payment.wallet_topup != nil do
+              case Settings.approve_topup(%{"id" => payment.wallet_topup.id}) do
+                {:ok, tp} ->
+                  %{status: "ok", res: tp |> BluePotion.sanitize_struct()}
+
+                _ ->
+                  %{status: "error"}
+              end
+            else
+              _ ->
+                %{status: "ok"}
+            end
+
+          _ ->
+            %{status: "error"}
+        end
+    end
+
+    json(conn, %{})
   end
 
   @doc """
@@ -752,6 +837,27 @@ defmodule BlogEngineWeb.ApiController do
   def post(conn, params) do
     res =
       case params["scope"] do
+        "gen_static_qr" ->
+          device = Settings.get_device_by_name(params["name"]) |> IO.inspect()
+
+          if device != nil do
+            res = Razer.staticqr(device.short_name, device.outlet.name)
+
+            sample = %{
+              "qrcode_data" =>
+                "00020201021126600014A000000615000101068900870228000000000000000000000012707752045331530345854041.005802MY5914FIUU SINGAPORE6009Singapore6106138538624905253bf054f4-39e0-4edb-b7ac-e0604kl010808itemdesc8232F0706242CAE8C0887A88606F5A2E9B996304434E",
+              "qrcode_link" =>
+                "http://chart.apis.google.com/chart?chs=150x150&cht=qr&chld=L|0&chl=00020201021126600014A000000615000101068900870228000000000000000000000012707752045331530345854041.005802MY5914FIUU+SINGAPORE6009Singapore6106138538624905253bf054f4-39e0-4edb-b7ac-e0604kl010808itemdesc8232F0706242CAE8C0887A88606F5A2E9B996304434E",
+              "status" => true
+            }
+
+            Settings.update_device(device, %{"qr_code_data" => res["qrcode_data"]})
+
+            res
+          else
+            %{status: "ok"}
+          end
+
         "checkout_by_amount" ->
           sample = %{
             "item_id" => 2,

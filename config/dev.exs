@@ -77,6 +77,7 @@ config :blog_engine, url: System.get_env("ENDPOINT")
 #   cert_location: "/priv/cert/private_key.pem"
 config :blog_engine, :mbos_api, System.get_env("MBOS_API")
 config :blog_engine, :ipay88, callback: System.get_env("IPAY88_CALLBACK")
+config :blog_engine, release: :dev
 
 config :blog_engine, :revenue_monster,
   prefix: "TST",
@@ -93,5 +94,10 @@ config :blog_engine, :billplz,
   key: System.get_env("BILLPLZ_API_KEY"),
   endpoint: System.get_env("BILLPLZ_API_ENDPOINT"),
   callback: System.get_env("BILLPLZ_API_CALLBACK_URL")
+
+config :blog_engine, :razer,
+  vkey: System.get_env("RAZER_VKEY_PROD"),
+  mid: System.get_env("RAZER_MID_PROD"),
+  endpoint: System.get_env("RAZER_ENDPOINT_PROD")
 
 config :blog_engine, BlogEngine.Mailer, adapter: Bamboo.LocalAdapter

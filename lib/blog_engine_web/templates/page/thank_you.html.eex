@@ -1,6 +1,6 @@
 <div class="d-flex justify-content-center align-items-center" style="height: 100vh;">
   <div class="d-flex flex-column justify-content-center">
-    <%= if @conn.params["status"] == "SUCCESS" || @conn.params["Status"] == "1"  do %>
+    <%= if @conn.params["status"] == "00"  do %>
     <h1 class="d-flex flex-column justify-content-center align-items-center">
       <i class="fa fa-check text-success" style="font-size: xxx-large;margin-bottom: 40px;"></i>
       Transaction Completed!
@@ -29,6 +29,12 @@
   
 
   setTimeout(() => {
-     window.close();
+    try {
+      
+      window.close();
+    } catch(e){
+      window.location  = "/home"
+
+    }
   }, 2000)
 </script>

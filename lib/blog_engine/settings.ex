@@ -192,6 +192,10 @@ defmodule BlogEngine.Settings do
     Repo.all(Device)
   end
 
+  def get_device_by_short_name(id) do
+    Repo.get_by(Device, short_name: id) |> Repo.preload(:outlet)
+  end
+
   def get_device_by_name(id) do
     Repo.get_by(Device, name: id) |> Repo.preload(:outlet)
   end
@@ -1381,6 +1385,8 @@ defmodule BlogEngine.Settings do
   end
 
   def update_page(model, params) do
+    bool_key = "show_nav"
+    params = append_bool_key(params, bool_key)
     res = Page.changeset(model, params) |> Repo.update() |> IO.inspect()
 
     case HTTPoison.get(

@@ -7,6 +7,8 @@ defmodule BlogEngine.Settings.Device do
     field(:is_suspended, :boolean, default: false)
     field(:name, :string)
 
+    field(:short_name, :string)
+    field(:qr_code_data, :binary)
     field(:is_cloridge, :boolean, default: false)
     field(:cloridge_device_uid, :string)
 
@@ -25,6 +27,8 @@ defmodule BlogEngine.Settings.Device do
   def changeset(device, attrs) do
     device
     |> cast(attrs, [
+      :short_name,
+      :qr_code_data,
       :is_cloridge,
       :cloridge_device_uid,
       :format,
