@@ -30,6 +30,7 @@ defmodule BlogEngine.Settings.Sale do
 
     has_many(:sales_items, BlogEngine.Settings.SalesItem, foreign_key: :sales_id)
 
+    belongs_to(:organization, BlogEngine.Settings.Organization)
     field(:payment_url, :string)
     field(:payment_channel, :string)
     field(:payment_ref, :string)
@@ -44,6 +45,7 @@ defmodule BlogEngine.Settings.Sale do
   def changeset(sale, attrs) do
     sale
     |> cast(attrs, [
+      :organization_id,
       :payment_url,
       :uid,
       :outlet_id,

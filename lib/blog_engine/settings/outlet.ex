@@ -14,8 +14,10 @@ defmodule BlogEngine.Settings.Outlet do
     field(:phone, :string)
     field(:email, :string)
     field(:collection_id, :string)
+    belongs_to(:organization, BlogEngine.Settings.Organization)
     field(:price_per_minutes, :float, default: 0.5)
     field(:payment_gateway, :string)
+    field(:currency, :string, default: "MYR")
     timestamps()
   end
 
@@ -23,6 +25,8 @@ defmodule BlogEngine.Settings.Outlet do
   def changeset(outlet, attrs) do
     outlet
     |> cast(attrs, [
+      :currency,
+      :organization_id,
       :price_per_minutes,
       :collection_id,
       :mkey,

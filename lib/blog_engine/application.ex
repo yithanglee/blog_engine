@@ -6,7 +6,13 @@ defmodule BlogEngine.Application do
   use Application
 
   def start(_type, _args) do
+    source =
+      {:service_account,
+       File.read!("#{Application.app_dir(:blog_engine) <> "/priv/static"}/service-account.json")
+       |> Jason.decode!()}
+
     children = [
+      {Goth, name: BlogEngine.Goth, source: source},
       # {BlogEngine.Queue, []},
       BlogEngine.Repo,
       # Start the Telemetry supervisor
@@ -34,6 +40,8 @@ defmodule BlogEngine.Application do
       "#{File.cwd!()}/media/",
       "#{Application.app_dir(:blog_engine)}/priv/static/images/uploads"
     )
+
+    DeviceTracker.start_link()
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options

@@ -38,7 +38,7 @@ config :blue_potion,
   otp_app: "BlogEngine",
   repo: BlogEngine.Repo,
   contexts: ["Settings"],
-  project: %{name: "BlogEngine", alias_name: "blog_engine", vsn: "0.1.0"},
+  project: %{name: "BlogEngine", alias_name: "blog_engine", vsn: "0.1.0", sname: "blog_engine"},
   server: %{
     url: "139.162.60.209",
     db_url: "127.0.0.1",
@@ -54,7 +54,11 @@ config :blue_potion,
     domain_name: "localhost"
   }
 
-config :blog_engine, BlogEngine.Scheduler, jobs: []
+config :blog_engine, BlogEngine.Scheduler,
+  jobs: [
+    {"*/30 * * * *", {BlogEngine, :check_online, ["1"]}}
+  ]
+
 # Application.get_env(:blog_engine, :cloridge)[:key]
 config :blog_engine, :cloridge,
   key: System.get_env("CLORIDGE_KEY"),

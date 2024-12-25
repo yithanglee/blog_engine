@@ -8,6 +8,7 @@ defmodule BlogEngine.Settings.Item do
     field(:name, :string)
     field(:price, :float)
 
+    belongs_to(:organization, BlogEngine.Settings.Organization)
     field(:short_name1, :string)
     field(:short_name2, :string)
     belongs_to(:outlet, BlogEngine.Settings.Outlet)
@@ -20,6 +21,7 @@ defmodule BlogEngine.Settings.Item do
   def changeset(item, attrs) do
     item
     |> cast(attrs, [
+      :organization_id,
       :short_name1,
       :short_name2,
       :outlet_id,

@@ -71,7 +71,7 @@ defmodule BlogEngineWeb.PageController do
 
               reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
 
-              %{reps: reps, delay: 0.5, name: "User fill #{amount}"}
+              %{reps: reps, delay: device.default_delay, name: "User fill #{amount}"}
             else
               item
             end
@@ -80,7 +80,7 @@ defmodule BlogEngineWeb.PageController do
 
           reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
 
-          %{reps: reps, delay: 0.5, name: "User fill #{amount}"}
+          %{reps: reps, delay: device.default_delay, name: "User fill #{amount}"}
         end
 
       reps =
@@ -227,6 +227,7 @@ defmodule BlogEngineWeb.PageController do
               uid: Ecto.UUID.generate(),
               amount: amt,
               outlet_id: device.outlet.id,
+              organization_id: device.organization_id,
               device_id: device.id,
               payment_channel: "duitnowsqr",
               sales_date: Date.utc_today()
@@ -254,8 +255,38 @@ defmodule BlogEngineWeb.PageController do
 
       amount = sale.amount
 
-      reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
-      item = %{reps: reps, delay: 0.5, name: "User fill #{amount}"}
+      # reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
+      # item = %{reps: reps, delay: 0.5, name: "User fill #{amount}"}
+      sale = sale |> BlogEngine.Repo.preload(:sales_items)
+      items = sale.sales_items |> IO.inspect()
+
+      item =
+        if items != [] do
+          item = items |> List.first() |> Map.get(:item)
+
+          item =
+            if item == nil do
+              amount =
+                sale.sales_items
+                |> List.first()
+                |> Map.get(:item_name)
+                |> String.replace("User fill ", "")
+                |> Integer.parse()
+                |> elem(0)
+
+              reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
+
+              %{reps: reps, delay: device.default_delay, name: "User fill #{amount}"}
+            else
+              item
+            end
+        else
+          amount = sale.amount
+
+          reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
+
+          %{reps: reps, delay: device.default_delay, name: "User fill #{amount}"}
+        end
 
       reps =
         if device.skip_first do

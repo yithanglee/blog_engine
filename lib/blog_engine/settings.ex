@@ -18,6 +18,28 @@ defmodule BlogEngine.Settings do
     end
   end
 
+  alias BlogEngine.Settings.Organization
+
+  def list_organizations() do
+    Repo.all(Organization)
+  end
+
+  def get_organization!(id) do
+    Repo.get!(Organization, id)
+  end
+
+  def create_organization(params \\ %{}) do
+    Organization.changeset(%Organization{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_organization(model, params) do
+    Organization.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_organization(%Organization{} = model) do
+    Repo.delete(model)
+  end
+
   def list_device_time_logs() do
     Repo.all(DeviceTimeLog)
   end
@@ -27,7 +49,19 @@ defmodule BlogEngine.Settings do
   end
 
   def create_device_time_log(params \\ %{}) do
-    DeviceTimeLog.changeset(%DeviceTimeLog{}, params) |> Repo.insert()
+    # here probably use a kv master to store their last online time?
+    res = DeviceTimeLog.changeset(%DeviceTimeLog{}, params) |> Repo.insert()
+
+    case res do
+      {:ok, dtl} ->
+        IO.inspect(dtl)
+        DeviceTracker.update_last_online(dtl.device_id)
+
+      _ ->
+        nil
+    end
+
+    res
   end
 
   def update_device_time_log(model, params) do
@@ -56,6 +90,10 @@ defmodule BlogEngine.Settings do
     DeviceLog.changeset(model, params) |> Repo.update() |> IO.inspect()
   end
 
+  def delete_all_device_log(device_id) do
+    Repo.delete_all(from(d in DeviceLog, where: d.device_id == ^device_id))
+  end
+
   def delete_device_log(%DeviceLog{} = model) do
     Repo.delete(model)
   end
@@ -79,14 +117,10 @@ defmodule BlogEngine.Settings do
   end
 
   def create_outlet(params \\ %{}) do
-    bool_key = "is_blocked"
-    params = append_bool_key(params, bool_key)
     Outlet.changeset(%Outlet{}, params) |> Repo.insert() |> IO.inspect()
   end
 
   def update_outlet(model, params) do
-    bool_key = "is_blocked"
-    params = append_bool_key(params, bool_key)
     Outlet.changeset(model, params) |> Repo.update() |> IO.inspect()
   end
 
@@ -117,6 +151,12 @@ defmodule BlogEngine.Settings do
   end
 
   def delete_sale(%Sale{} = model) do
+    si = model |> Repo.preload(:sales_items) |> Map.get(:sales_items)
+
+    for item <- si do
+      Repo.delete(item)
+    end
+
     Repo.delete(model)
   end
 
@@ -201,7 +241,7 @@ defmodule BlogEngine.Settings do
   end
 
   def get_device!(id) do
-    Repo.get!(Device, id)
+    Repo.get!(Device, id) |> Repo.preload([:outlet, :organization])
   end
 
   def create_update_device(params \\ %{}) do
@@ -232,18 +272,6 @@ defmodule BlogEngine.Settings do
   end
 
   def update_device(model, params) do
-    bool_key = "is_active"
-    params = append_bool_key(params, bool_key)
-
-    bool_key = "record_wifi_time"
-    params = append_bool_key(params, bool_key)
-
-    bool_key = "is_cloridge"
-    params = append_bool_key(params, bool_key)
-
-    bool_key = "skip_first"
-    params = append_bool_key(params, bool_key) |> IO.inspect()
-
     Device.changeset(model, params) |> Repo.update() |> IO.inspect()
   end
 
@@ -262,18 +290,10 @@ defmodule BlogEngine.Settings do
   end
 
   def create_slide(params \\ %{}) do
-    bool_key = "is_show"
-    params = append_bool_key(params, bool_key)
-    bool_key = "is_banner"
-    params = append_bool_key(params, bool_key)
     Slide.changeset(%Slide{}, params) |> Repo.insert() |> IO.inspect()
   end
 
   def update_slide(model, params) do
-    bool_key = "is_show"
-    params = append_bool_key(params, bool_key)
-    bool_key = "is_banner"
-    params = append_bool_key(params, bool_key)
     Slide.changeset(model, params) |> Repo.update() |> IO.inspect()
   end
 
@@ -326,11 +346,6 @@ defmodule BlogEngine.Settings do
   end
 
   def create_app_route(params \\ %{}) do
-    bool_key = "can_get"
-    params = append_bool_key(params, bool_key)
-
-    bool_key = "can_post"
-    params = append_bool_key(params, bool_key)
     name = params["name"]
     check = Repo.all(from(ap in AppRoute, where: ap.name == ^name))
 
@@ -342,11 +357,6 @@ defmodule BlogEngine.Settings do
   end
 
   def update_app_route(model, params) do
-    bool_key = "can_get"
-    params = append_bool_key(params, bool_key)
-
-    bool_key = "can_post"
-    params = append_bool_key(params, bool_key)
     AppRoute.changeset(model, params) |> Repo.update() |> IO.inspect()
   end
 
@@ -386,9 +396,20 @@ defmodule BlogEngine.Settings do
     Repo.get!(RoleAppRoute, id)
   end
 
-  def create_role_app_route(params \\ %{}) do
-    sample = %{"AppRoute" => %{"1" => %{"1" => "on", "2" => "on"}}, "id" => "0"}
+  def create_role_app_route(
+        %{"app_route_id" => app_route_ids, "id" => "0", "role_id" => role_id} = _params
+      ) do
+    Repo.delete_all(from(rap in RoleAppRoute, where: rap.role_id == ^role_id))
 
+    for app_route_id <- app_route_ids |> String.split(",") do
+      params = %{"role_id" => role_id, "app_route_id" => app_route_id}
+      RoleAppRoute.changeset(%RoleAppRoute{}, params) |> Repo.insert() |> IO.inspect()
+    end
+
+    {:ok, %RoleAppRoute{id: 0}}
+  end
+
+  def create_role_app_route(%{"AppRoute" => %{} = mapList, "id" => "0"} = params) do
     role_id = Map.keys(params["AppRoute"]) |> List.first()
 
     items = params["AppRoute"][role_id] |> Map.keys()
@@ -573,88 +594,19 @@ defmodule BlogEngine.Settings do
           attrs
       end
 
-    attrs =
-      with true <- "temp_pin" in Map.keys(attrs),
-           true <- attrs["temp_pin"] != "" do
-        crypted_password =
-          :crypto.hash(:sha512, attrs["temp_pin"]) |> Base.encode16() |> String.downcase()
-
-        attrs |> Map.put("temp_pin", crypted_password)
-      else
-        _ ->
-          attrs
-      end
-
-    attrs =
-      if "is_stockist" in Map.keys(attrs) do
-        attrs |> Map.put("is_stockist", attrs["is_stockist"] == "on")
-      else
-        attrs
-      end
-
-    attrs =
-      if "rank_id" in Map.keys(attrs) do
-        attrs |> Map.put("rank_name", BlogEngine.Settings.get_rank!(attrs["rank_id"]).name)
-      else
-        attrs
-      end
-
     cg =
       Multi.new()
       |> Multi.run(:user, fn _repo, %{} ->
         User.changeset(model, attrs) |> Repo.update()
       end)
-      |> Multi.run(:placements, fn _repo, %{user: user} ->
-        # user has many placements if its a stockist
-
-        if user.is_stockist do
-          stockist_users = user |> Repo.preload(:stockist_users) |> Map.get(:stockist_users)
-
-          for stockist_user <- stockist_users do
-            [username, position] = stockist_user.username |> String.split("-") |> IO.inspect()
-
-            {:ok, u} =
-              User.changeset(
-                stockist_user,
-                attrs
-                |> Map.take([
-                  "fullname",
-                  "phone",
-                  "email",
-                  "country_id",
-                  "bank_account_holder",
-                  "bank_account_no",
-                  "bank_name"
-                ])
-                |> Map.put("username", attrs["username"] <> "-" <> position)
-              )
-              |> Repo.update()
-              |> IO.inspect()
-          end
-        else
-        end
-
-        {:ok, nil}
-      end)
       |> Repo.transaction()
       |> IO.inspect()
-
-    # |> Multi.run(:merchant, fn _repo, %{user: user} ->
-    #   if user.merchant != nil do
-    #     Merchant.changeset(user.merchant, %{name: attrs["fullname"]}) |> Repo.update()
-    #   else
-    #     Merchant.changeset(%Merchant{}, %{name: attrs["fullname"], user_id: user.id}) |> Repo.insert()
-    #   end
-    # end)
-
-    # User.changeset(model, attrs) |> Repo.update() |> IO.inspect()
 
     case cg do
       {:ok, multi_res} ->
         u =
           multi_res
           |> Map.get(:user)
-          |> Repo.preload([:merchant, :rank])
           |> Map.put(
             :token,
             BlogEngine.Settings.member_token(multi_res |> Map.get(:user) |> Map.get(:id))
@@ -1252,7 +1204,7 @@ defmodule BlogEngine.Settings do
       FROM
         device_time_logs
       WHERE
-        device_id = $1 AND inserted_at BETWEEN $2 AND $3 
+        device_id = $1 AND inserted_at BETWEEN $2 AND $3
       UNION ALL
       SELECT
         minute + interval '1 minute'
@@ -1265,7 +1217,7 @@ defmodule BlogEngine.Settings do
           FROM
             device_time_logs
           WHERE
-            device_id = $1 AND inserted_at BETWEEN $2 AND $3 
+            device_id = $1 AND inserted_at BETWEEN $2 AND $3
         )
     )
     SELECT
@@ -1385,8 +1337,6 @@ defmodule BlogEngine.Settings do
   end
 
   def update_page(model, params) do
-    bool_key = "show_nav"
-    params = append_bool_key(params, bool_key)
     res = Page.changeset(model, params) |> Repo.update() |> IO.inspect()
 
     case HTTPoison.get(
@@ -1434,5 +1384,304 @@ defmodule BlogEngine.Settings do
 
   def delete_section(%Section{} = model) do
     Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.MessagingDevice
+
+  def list_messaging_devices() do
+    Repo.all(MessagingDevice)
+  end
+
+  def get_messaging_device!(id) do
+    Repo.get!(MessagingDevice, id)
+  end
+
+  def create_messaging_device(params \\ %{}) do
+    check = Repo.all(from(md in MessagingDevice, where: md.uuid == ^params["uuid"]))
+
+    if check == [] do
+      MessagingDevice.changeset(%MessagingDevice{}, params) |> Repo.insert() |> IO.inspect()
+    else
+      {:ok, List.first(check)}
+    end
+  end
+
+  def fcm_publish(
+        id,
+        title,
+        body,
+        device_token \\ "cXh-Hxbk88EuxnkpTuDySj:APA91bGZombjdutaWzQomruMWYclBo1JGnhg_V6fGAuZ5_RIrFzrWXDx_qnTC2_q66RJJUuFhV-I3V2RtQD7ffStOq8xuT19fejsNNj0kR-isS5qcE_5JKQ"
+      ) do
+    access_token = Goth.fetch!(BlogEngine.Goth).token
+
+    message = %{
+      "message" => %{
+        "token" => device_token,
+        "notification" => %{
+          "title" => title,
+          "body" => body
+        },
+        "data" => %{
+          "id" => "#{id}",
+          "path" => "orders",
+          "created_at" => Date.utc_today(),
+          "click_action" => "FLUTTER_NOTIFICATION_CLICK"
+        }
+      }
+    }
+
+    # todo, check the error, then delete the access token
+    HTTPoison.post(
+      "https://fcm.googleapis.com/v1/projects/djtech-655dd/messages:send",
+      message |> Jason.encode!(),
+      [
+        {"content-type", "application/json"},
+        {"Authorization", "Bearer #{access_token}"}
+      ]
+    )
+  end
+
+  def update_messaging_device(model, params) do
+    MessagingDevice.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_messaging_device(%MessagingDevice{} = model) do
+    Repo.delete(model)
+  end
+
+  # BlogEngine.Settings.monthly_outlet_trx_only_days()
+
+  def monthly_outlet_trx_only_days(params \\ %{}) do
+    organization_id = Map.get(params, "organization_id", nil)
+
+    organization_id =
+      if organization_id != nil do
+        String.to_integer(organization_id)
+      else
+        nil
+      end
+
+    qparams = ["complete"]
+    [y, m, d] = Date.utc_today() |> Date.to_string() |> String.split("-")
+    year_month = Map.get(params, "year_month", "#{y}-#{m}")
+
+    organization_q =
+      if organization_id != nil do
+        """
+        and d.organization_id = $2
+        """
+      else
+        """
+        """
+      end
+
+    qparams = qparams |> List.insert_at(Enum.count(qparams), organization_id)
+
+    # Get the current number of days in the current month
+    days_in_month_query = """
+      SELECT EXTRACT(DAY FROM (DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 MONTH' - INTERVAL '1 DAY'))::INT;
+    """
+
+    {:ok, %Postgrex.Result{rows: [[days_in_month]]}} = Repo.query(days_in_month_query, [])
+
+    # Dynamically create FILTER clauses for each day of the current month
+    day_filters =
+      Enum.map(1..31, fn day ->
+        """
+        sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{String.pad_leading(Integer.to_string(day), 2, "0")}') AS day_#{day}
+        """
+      end)
+      |> Enum.join(",\n")
+
+    query3 = """
+
+    select
+        to_char(l.inserted_at, 'YYYY-MM') as year,
+        d.short_name as device,
+        d.name as device_long,
+        count(l.id) as transactions,
+        sum(l.amount) as amount,
+        o.name as outlet,
+        COALESCE(oz.name, 'n/a') as organization,
+        #{day_filters}
+      from
+        sales l
+        left join devices d on d.id = l.device_id
+        left join outlets o on o.id = l.outlet_id
+        full join organizations oz on oz.id = d.organization_id
+      where
+        l.status = $1
+        and to_char(l.inserted_at, 'YYYY-MM') = '#{year_month}'
+        #{organization_q}
+      group by
+        d.name, d.short_name, o.name, oz.name, to_char(l.inserted_at, 'YYYY-MM')
+      order by
+        to_char(l.inserted_at, 'YYYY-MM') desc;
+    """
+
+    type = ""
+
+    query =
+      case type do
+        _ ->
+          query3
+      end
+
+    {:ok, %Postgrex.Result{columns: columns, rows: rows} = res} =
+      Repo.query(query, qparams |> Enum.reject(&(&1 == nil)))
+
+    for row <- rows do
+      Enum.zip(columns |> Enum.map(&(&1 |> String.to_atom())), row) |> Enum.into(%{})
+    end
+    |> IO.inspect()
+  end
+
+  def monthly_outlet_trx_only_rp(params \\ %{}) do
+    organization_id = Map.get(params, "organization_id", nil)
+
+    organization_id =
+      if organization_id != nil do
+        String.to_integer(organization_id)
+      else
+        nil
+      end
+
+    qparams = ["complete"]
+
+    organization_q =
+      if organization_id != nil do
+        """
+        and d.organization_id = $2
+        """
+      else
+        """
+
+        """
+      end
+
+    qparams = qparams |> List.insert_at(Enum.count(qparams), organization_id)
+
+    query3 = """
+
+    select
+        to_char(l.inserted_at, 'YYYY') as year,
+        d.short_name as device,
+        d.name as device_long,
+        count(l.id) as transactions,
+        ROUND(COALESCE(sum(l.amount)::numeric, 0), 2) as amount,
+        o.name as outlet,
+        COALESCE(oz.name, 'n/a') as organization,
+        ROUND(COALESCE(sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'MM') = '01')::numeric, 0), 2) AS jan,
+        ROUND(COALESCE(sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'MM') = '02')::numeric, 0), 2) AS feb,
+        ROUND(COALESCE(sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'MM') = '03')::numeric, 0), 2) AS mar,
+        ROUND(COALESCE(sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'MM') = '04')::numeric, 0), 2) AS apr,
+        ROUND(COALESCE(sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'MM') = '05')::numeric, 0), 2) AS may,
+        ROUND(COALESCE(sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'MM') = '06')::numeric, 0), 2) AS jun,
+        ROUND(COALESCE(sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'MM') = '07')::numeric, 0), 2) AS jul,
+        ROUND(COALESCE(sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'MM') = '08')::numeric, 0), 2) AS aug,
+        ROUND(COALESCE(sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'MM') = '09')::numeric, 0), 2) AS sep,
+        ROUND(COALESCE(sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'MM') = '10')::numeric, 0), 2) AS oct,
+        ROUND(COALESCE(sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'MM') = '11')::numeric, 0), 2) AS nov,
+        ROUND(COALESCE(sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'MM') = '12')::numeric, 0), 2) AS dec
+      from
+        sales l
+        left join devices d on d.id = l.device_id
+        left join outlets o on o.id = l.outlet_id
+        full join organizations oz on oz.id = d.organization_id
+      where l.status = $1
+      #{organization_q}
+      group by d.name, d.short_name, o.name, oz.name, to_char(l.inserted_at, 'YYYY')
+      order by to_char(l.inserted_at, 'YYYY') desc;
+    """
+
+    type = ""
+
+    query =
+      case type do
+        _ ->
+          query3
+      end
+
+    {:ok, %Postgrex.Result{columns: columns, rows: rows} = res} =
+      Repo.query(query, qparams |> Enum.reject(&(&1 == nil)))
+
+    for row <- rows do
+      IO.inspect(row)
+      Enum.zip(columns |> Enum.map(&(&1 |> String.to_atom())), row) |> Enum.into(%{})
+    end
+  end
+
+  def yearly_sales_performance(type \\ "MY", organization_id) do
+    if organization_id == nil do
+      query3 = """
+      select
+        to_char( l.inserted_at , 'YYYY') as year,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '01') AS jan,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '02') AS feb,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '03') AS mar,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '04') AS apr,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '05') AS may,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '06') AS jun,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '07') AS jul,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '08') AS aug,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '09') AS sep,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '10') AS oct,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '11') AS nov,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '12') AS dec
+      from
+        sales l
+        where l.status = $1
+        group by to_char( l.inserted_at , 'YYYY') order by to_char( l.inserted_at , 'YYYY') desc ;
+      """
+
+      params = ["complete"]
+
+      query =
+        case type do
+          _ ->
+            query3
+        end
+
+      {:ok, %Postgrex.Result{columns: columns, rows: rows} = res} = Repo.query(query, params)
+
+      for row <- rows do
+        Enum.zip(columns |> Enum.map(&(&1 |> String.to_atom())), row) |> Enum.into(%{})
+      end
+    else
+      query3 = """
+      select
+        to_char( l.inserted_at , 'YYYY') as year,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '01') AS jan,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '02') AS feb,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '03') AS mar,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '04') AS apr,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '05') AS may,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '06') AS jun,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '07') AS jul,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '08') AS aug,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '09') AS sep,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '10') AS oct,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '11') AS nov,
+        sum(l.amount) FILTER(WHERE to_char( l.inserted_at , 'YYYY') = to_char( l.inserted_at , 'YYYY') and to_char( l.inserted_at , 'MM') = '12') AS dec
+      from
+        sales l
+        where l.organization_id = $1 and l.status = $2
+        group by to_char( l.inserted_at , 'YYYY') order by to_char( l.inserted_at , 'YYYY') desc ;
+      """
+
+      params = [organization_id |> String.to_integer(), "complete"]
+
+      query =
+        case type do
+          _ ->
+            query3
+        end
+
+      {:ok, %Postgrex.Result{columns: columns, rows: rows} = res} = Repo.query(query, params)
+
+      for row <- rows do
+        Enum.zip(columns |> Enum.map(&(&1 |> String.to_atom())), row) |> Enum.into(%{})
+      end
+    end
   end
 end

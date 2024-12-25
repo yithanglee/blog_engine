@@ -8,12 +8,21 @@ defmodule Razer do
   # vkey Application.get_env(:blog_engine, :razer)[:vkey]
   require IEx
 
-  def staticqr(device_uid, outlet_name, merchant_id, vkey) do
+  def staticqr(device_uid, outlet_name, merchant_id, vkey, setting_currency \\ "MYR") do
+    {currency, pg} =
+      case setting_currency do
+        "SGD" ->
+          {"SGD", "PayNowSQR"}
+
+        _ ->
+          {"MYR", "DuitNowSQR"}
+      end
+
     generate_signature = fn ->
       merchant_id = merchant_id
       verify_key = vkey
 
-      str = merchant_id <> "DuitNowSQR" <> device_uid <> "MYR" <> "1" <> vkey
+      str = merchant_id <> "#{pg}" <> device_uid <> "#{currency}" <> "1" <> vkey
       IO.puts(str)
       md5 = :crypto.hash(:md5, str) |> Base.encode16(case: :lower)
       IO.puts(md5)
@@ -23,7 +32,7 @@ defmodule Razer do
     checksum = generate_signature.()
 
     url =
-      "https://api.merchant.razer.com/RMS/API/staticqr/index.php?merchantID=#{merchant_id}&channel=DuitNowSQR&orderid=#{device_uid}&currency=MYR&amount=1&bill_name=#{outlet_name}&bill_desc=itemdesc&checksum=#{checksum}"
+      "https://api.merchant.razer.com/RMS/API/staticqr/index.php?merchantID=#{merchant_id}&channel=#{pg}&orderid=#{device_uid}&currency=#{currency}&amount=1&bill_name=#{outlet_name}&bill_desc=itemdesc&checksum=#{checksum}"
 
     response = HTTPoison.get!(url)
 

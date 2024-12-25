@@ -19,6 +19,7 @@ defmodule BlogEngine.Settings.User do
     field(:rank_name, :string)
     field(:username, :string)
     belongs_to(:rank, BlogEngine.Settings.Rank)
+    belongs_to(:organization, BlogEngine.Settings.Organization)
     has_one(:royalty_user, BlogEngine.Settings.RoyaltyUser)
     field(:u2, :string, virtual: true)
     field(:u3, :string, virtual: true)
@@ -38,6 +39,7 @@ defmodule BlogEngine.Settings.User do
   def changeset(user, attrs) do
     user
     |> cast(attrs, [
+      :organization_id,
       :temp_pin,
       :country_id,
       :is_stockist,

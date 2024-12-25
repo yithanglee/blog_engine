@@ -3,7 +3,7 @@ defmodule BlogEngine.Settings.DeviceTimeLog do
   import Ecto.Changeset
 
   schema "device_time_logs" do
-    field :device_id, :integer
+    field(:device_id, :integer)
 
     timestamps()
   end

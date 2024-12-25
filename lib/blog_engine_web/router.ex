@@ -34,7 +34,11 @@ defmodule BlogEngineWeb.Router do
         "https://fonts.gstatic.com",
         "https://svt_blog.damienslab.com",
         "http://svt_blog.damienslab.com",
-        "http://localhost:5173"
+        "http://admin.djtech4u.com",
+        "https://admin.djtech4u.com",
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:3000"
       ]
 
     plug(BlogEngine.ApiAuthorization)
@@ -54,7 +58,11 @@ defmodule BlogEngineWeb.Router do
         "https://fonts.gstatic.com",
         "https://svt_blog.damienslab.com",
         "http://svt_blog.damienslab.com",
-        "http://localhost:5173"
+        "http://admin.djtech4u.com",
+        "https://admin.djtech4u.com",
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:3000"
       ]
 
     plug(BlogEngine.ApiAuthorization)
@@ -130,6 +138,7 @@ defmodule BlogEngineWeb.Router do
   scope "/", BlogEngineWeb do
     pipe_through :browser_blank
 
+    get "/test_razer", PageController, :razer_payment
     post "/test_razer", PageController, :razer_payment
     post "/thank_you", PageController, :thank_you
   end

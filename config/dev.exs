@@ -96,8 +96,8 @@ config :blog_engine, :billplz,
   callback: System.get_env("BILLPLZ_API_CALLBACK_URL")
 
 config :blog_engine, :razer,
-  vkey: System.get_env("RAZER_VKEY_PROD"),
-  mid: System.get_env("RAZER_MID_PROD"),
-  endpoint: System.get_env("RAZER_ENDPOINT_PROD")
+  vkey: System.get_env("RAZER_VKEY"),
+  mid: System.get_env("RAZER_MID"),
+  endpoint: System.get_env("RAZER_ENDPOINT")
 
 config :blog_engine, BlogEngine.Mailer, adapter: Bamboo.LocalAdapter

@@ -5,10 +5,77 @@ defmodule BlogEngine do
   @moduledoc """
   BlogEngine keeps the contexts that define your domain
   and business logic.
+  BlogEnging.check_online()
 
   Contexts are also responsible for managing your data, regardless
   if it comes from the database, an external API or others.
   """
+
+  def check_online(params \\ "") do
+    admins =
+      Repo.all(
+        from(s in Settings.Staff,
+          left_join: r in Settings.Role,
+          on: r.id == s.role_id,
+          left_join: md in Settings.MessagingDevice,
+          on: md.staff_id == s.id,
+          where: r.name in ^["Owner", "Admin"],
+          select: [md.uuid]
+        )
+      )
+
+    device_ids =
+      Repo.all(
+        from(d in Settings.Device,
+          left_join: o in Settings.Outlet,
+          on: o.id == d.outlet_id,
+          left_join: og in Settings.Organization,
+          on: og.id == d.organization_id,
+          left_join: s in Settings.Staff,
+          on: s.organization_id == og.id,
+          left_join: md in Settings.MessagingDevice,
+          on: md.staff_id == s.id,
+          select: %{id: d.id, label: d.label, outlet_name: o.name, uuid: md.uuid}
+        )
+      )
+
+    for %{id: id, label: label, outlet_name: outlet_name, uuid: uuid} <- device_ids do
+      timestamp = DateTime.utc_now() |> DateTime.add(8 * 60 * 60) |> DateTime.to_iso8601()
+
+      case DeviceTracker.get_last_online(id) do
+        {:ok, last_online} ->
+          nil
+          diff = DateTime.utc_now() |> DateTime.diff(last_online)
+
+          if diff > 300 && diff < 2 * 60 * 60 do
+            # todo: findd the device outlet organization user's messaging device, 
+            # and create the notification on the browser
+
+            BlogEngine.Settings.fcm_publish(
+              0,
+              "Device Online Checker",
+              "#{outlet_name}'s #{label} is not online. Checked #{timestamp} ",
+              uuid
+            )
+
+            for admin_uuid <- admins do
+              BlogEngine.Settings.fcm_publish(
+                0,
+                "Device Online Checker",
+                "#{outlet_name}'s #{label} is not online. Checked #{timestamp}",
+                admin_uuid
+              )
+            end
+          end
+
+          diff
+
+        _ ->
+          nil
+      end
+    end
+  end
+
   def encode_params(params) do
     encode_value = fn tuple ->
       case tuple do

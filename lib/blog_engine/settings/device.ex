@@ -6,12 +6,12 @@ defmodule BlogEngine.Settings.Device do
     field(:is_active, :boolean, default: false)
     field(:is_suspended, :boolean, default: false)
     field(:name, :string)
-
+    field(:label, :string)
     field(:short_name, :string)
     field(:qr_code_data, :binary)
     field(:is_cloridge, :boolean, default: false)
     field(:cloridge_device_uid, :string)
-
+    field(:default_delay, :float, default: 0.1)
     field(:format, :string, default: "pwm")
     field(:record_wifi_time, :boolean, default: false)
     field(:short_desc, :string)
@@ -19,6 +19,7 @@ defmodule BlogEngine.Settings.Device do
     field(:default_io_pin, :integer, default: 0)
     belongs_to(:executor_board, BlogEngine.Settings.Device, foreign_key: :executor_board_id)
 
+    belongs_to(:organization, BlogEngine.Settings.Organization)
     field(:skip_first, :boolean, default: false)
     timestamps()
   end
@@ -27,6 +28,9 @@ defmodule BlogEngine.Settings.Device do
   def changeset(device, attrs) do
     device
     |> cast(attrs, [
+      :label,
+      :default_delay,
+      :organization_id,
       :short_name,
       :qr_code_data,
       :is_cloridge,

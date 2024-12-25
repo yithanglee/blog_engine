@@ -45,9 +45,6 @@ defmodule BlogEngineWeb.UserChannel do
 
   @impl true
   def handle_in("pwm_response", payload, socket) do
-    IO.inspect("pwm_response")
-    IO.inspect(socket.assigns)
-    IO.inspect(payload)
     device = BlogEngine.Settings.get_device_by_name(socket.assigns.uuid)
 
     BlogEngine.Settings.create_device_log(%{
@@ -59,19 +56,18 @@ defmodule BlogEngineWeb.UserChannel do
     {:noreply, socket}
   end
 
-  # Channels can be used in a request/response fashion
-  # by sending replies to requests from the client
   @impl true
   def handle_in("ping", payload, socket) do
-    # IO.inspect(payload)
-    # IO.inspect(socket)
     if socket.assigns.device_id != nil do
-      Elixir.Task.start_link(BlogEngine.Settings, :create_device_time_log, [
-        %{device_id: socket.assigns.device_id}
-      ])
+      # Elixir.Task.start_link(BlogEngine.Settings, :create_device_time_log, [
+      #   %{device_id: socket.assigns.device_id}
+      # ])
+
+      BlogEngine.Settings.create_device_time_log(%{device_id: socket.assigns.device_id})
+    else
+      IO.inspect("the device id was not assigned here..")
     end
 
-    # here check outstanding work 
     broadcast(socket, "i_am_online", payload)
     {:reply, {:ok, payload}, socket}
   end

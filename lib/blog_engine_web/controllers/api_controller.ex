@@ -2,6 +2,7 @@ defmodule BlogEngineWeb.ApiController do
   use BlogEngineWeb, :controller
 
   alias BlogEngine.{Repo, Settings}
+  require Logger
 
   def ngrok_post(conn, params) do
     final =
@@ -176,6 +177,7 @@ defmodule BlogEngineWeb.ApiController do
             Settings.create_sale(%{
               sales_date: Date.utc_today(),
               outlet_id: outlet_item.outlet.id,
+              organization_id: device.organization_id,
               device_id: device.id,
               amount: outlet_item.price,
               status: :pending_payment,
@@ -216,6 +218,7 @@ defmodule BlogEngineWeb.ApiController do
                 sales_date: Date.utc_today(),
                 outlet_id: outlet_item.outlet.id,
                 device_id: device.id,
+                organization_id: device.organization_id,
                 amount: outlet_item.price,
                 status: :pending_payment,
                 uid: Ecto.UUID.generate()
@@ -290,6 +293,15 @@ defmodule BlogEngineWeb.ApiController do
             _ ->
               nil
           end
+
+        "current_month_outlet_trx_only_days" ->
+          Settings.monthly_outlet_trx_only_days(params)
+
+        "current_month_outlet_trx_only_rp" ->
+          Settings.monthly_outlet_trx_only_rp(params)
+
+        "yearly_sales_performance" ->
+          Settings.yearly_sales_performance("MY", params["organization_id"])
 
         "get_outlet" ->
           Settings.get_outlet_by_subdomain(params["code"])
@@ -468,82 +480,6 @@ defmodule BlogEngineWeb.ApiController do
     end
   end
 
-  def razer_payment(conn, params) do
-    IO.inspect(params)
-
-    sample = %{
-      "amount" => "10.00",
-      "appcode" => "",
-      "channel" => "maybank2u",
-      "currency" => "RM",
-      "domain" => "SB_MGhaho2u",
-      "error_code" => "FPX_",
-      "error_desc" => "",
-      "nbcb" => "1",
-      "orderid" => "76",
-      "paydate" => "2024-03-16 14:09:48",
-      "skey" => "598323fe40714e5fa03b7d903da7df2e",
-      "status" => "11",
-      "tranID" => "30775069"
-    }
-
-    %{
-      "amount" => "10.00",
-      "appcode" => "",
-      "channel" => "maybank2u",
-      "currency" => "RM",
-      "domain" => "SB_MGhaho2u",
-      "error_code" => "",
-      "error_desc" => "",
-      "nbcb" => "1",
-      "orderid" => "TOPUP76",
-      "paydate" => "2024-03-16 14:11:49",
-      "skey" => "079b4431229d22f46f0ae3e50a2ebd75",
-      "status" => "00",
-      "tranID" => "30775070"
-    }
-
-    payment = Settings.get_payment_by_billplz_code(params["orderid"])
-
-    payment |> Settings.update_payment(%{webhook_details: Jason.encode!(params)})
-
-    with true <- params["status"] == "00",
-         true <- payment != nil,
-         true <- payment.sales != nil,
-         sales <- payment.sales,
-         {:ok, register_params} <- sales.registration_details |> Jason.decode() do
-      case Settings.register(register_params["user"], sales) do
-        {:ok, multi_res} ->
-          %{status: "ok", res: multi_res |> BluePotion.sanitize_struct()}
-
-        _ ->
-          %{status: "error"}
-      end
-    else
-      _ ->
-        case params["status"] do
-          "00" ->
-            with true <- payment.wallet_topup != nil do
-              case Settings.approve_topup(%{"id" => payment.wallet_topup.id}) do
-                {:ok, tp} ->
-                  %{status: "ok", res: tp |> BluePotion.sanitize_struct()}
-
-                _ ->
-                  %{status: "error"}
-              end
-            else
-              _ ->
-                %{status: "ok"}
-            end
-
-          _ ->
-            %{status: "error"}
-        end
-    end
-
-    json(conn, %{})
-  end
-
   @doc """
   BlogEngine.Settings.get_sale!(16)
   """
@@ -713,6 +649,23 @@ defmodule BlogEngineWeb.ApiController do
       "optional" => ""
     }
 
+    fiuu_sample = %{
+      "amount" => "3.00",
+      "appcode" => "",
+      "channel" => "RPP_DuitNowQR",
+      "currency" => "RM",
+      "domain" => "djtechplt_Dev",
+      "error_code" => "",
+      "error_desc" => "",
+      "extraP" =>
+        "{\"DbtrAgt\":\"MBBEMYKL\",\"DbtrAcct_Type\":\"SVGS\",\"TxnType\":\"DOMESTIC\",\"refundability\":\"true\",\"bank_issuer\":\"Maybank Berhad\",\"duitnowqr_indicator\":\"20241225MBBEMYKL030OQR73397985\"}",
+      "orderid" => "SO2729",
+      "paydate" => "2024-12-25 10:51:03",
+      "skey" => "958bdf2c55f373aded4271b10c95082c",
+      "status" => "00",
+      "tranID" => "2593597375"
+    }
+
     order = params
 
     sale =
@@ -723,10 +676,109 @@ defmodule BlogEngineWeb.ApiController do
       |> IO.inspect()
 
     outlet = BlogEngine.Settings.get_outlet!(sale.outlet_id)
-    status = Map.get(params, "Status") |> IO.inspect()
+    # status = Map.get(params, "Status") |> IO.inspect()
+    status = Map.get(params, "status") |> IO.inspect()
 
     if sale.status != :complete do
       case status do
+        "00" ->
+          nil
+          uuid = Ecto.UUID.generate()
+
+          device = sale.device
+
+          device = device |> Repo.preload(:executor_board)
+
+          executor_board = device.executor_board
+
+          device =
+            if executor_board != nil do
+              executor_board
+            else
+              device
+            end
+
+          items = sale.sales_items |> IO.inspect()
+
+          item =
+            if items != [] do
+              item = items |> List.first() |> Map.get(:item)
+
+              item =
+                if item == nil do
+                  amount =
+                    sale.sales_items
+                    |> List.first()
+                    |> Map.get(:item_name)
+                    |> String.replace("User fill ", "")
+                    |> Integer.parse()
+                    |> elem(0)
+
+                  reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
+
+                  %{reps: reps, delay: 0.5, name: "User fill #{amount}"}
+                else
+                  item
+                end
+            else
+              amount = sale.amount
+
+              reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
+
+              %{reps: reps, delay: 0.5, name: "User fill #{amount}"}
+            end
+
+          reps =
+            if device.skip_first do
+              item.reps - 1
+            else
+              item.reps
+            end
+
+          {delay, reps} =
+            if reps == 0 do
+              {0.01, 1}
+            else
+              {item.delay, reps}
+            end
+
+          format = device.format
+
+          if device.is_cloridge do
+            CloridgeAPI.send_message(reps, device.cloridge_device_uid)
+          else
+            BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
+              "action" => "start",
+              "format" => format,
+              "reps" => reps,
+              "delay" => delay,
+              "uuid" => uuid,
+              "pin" => device.default_io_pin
+            })
+          end
+
+          BlogEngine.Settings.create_device_log(%{
+            device_id: device.id,
+            uuid: uuid,
+            job_content:
+              Jason.encode!(%{
+                "action" => "start",
+                "reps" => item.reps,
+                "delay" => item.delay,
+                "uuid" => uuid,
+                "pin" => device.default_io_pin
+              }),
+            remarks:
+              "sales id:#{sale.id} start #{item.name} with reps: #{item.reps} delay: #{item.delay} on pin #{device.default_io_pin}"
+          })
+          |> IO.inspect()
+
+          BlogEngine.Settings.update_sale(sale, %{
+            payment_webhook: params |> Jason.encode!(),
+            status: :complete
+          })
+          |> IO.inspect()
+
         "1" ->
           nil
 
@@ -837,19 +889,37 @@ defmodule BlogEngineWeb.ApiController do
   def post(conn, params) do
     res =
       case params["scope"] do
+        "user_fcm_token" ->
+          check_staff = params["user_token"] |> BlogEngine.Settings.get_cookie_user_by_cookie()
+
+          if check_staff != nil do
+            # this is a Staff struct
+            Settings.create_messaging_device(%{
+              "staff_id" => check_staff.user.id,
+              "uuid" => params["token"]
+            })
+          end
+
+          %{status: "ok"}
+
+        "delete_all_device_log" ->
+          Settings.delete_all_device_log(params["device_id"])
+          %{status: "ok"}
+
         "gen_static_qr" ->
           device = Settings.get_device_by_name(params["name"]) |> IO.inspect()
 
-          if device != nil do
-            res = Razer.staticqr(device.short_name, device.outlet.name)
+          # sample: Razer.staticqr("d48a-fc602e74", "Duitnow Fiuu", "djtechplt_Dev", "e37344c535a8d12000294306994251a3", "SGD")
 
-            sample = %{
-              "qrcode_data" =>
-                "00020201021126600014A000000615000101068900870228000000000000000000000012707752045331530345854041.005802MY5914FIUU SINGAPORE6009Singapore6106138538624905253bf054f4-39e0-4edb-b7ac-e0604kl010808itemdesc8232F0706242CAE8C0887A88606F5A2E9B996304434E",
-              "qrcode_link" =>
-                "http://chart.apis.google.com/chart?chs=150x150&cht=qr&chld=L|0&chl=00020201021126600014A000000615000101068900870228000000000000000000000012707752045331530345854041.005802MY5914FIUU+SINGAPORE6009Singapore6106138538624905253bf054f4-39e0-4edb-b7ac-e0604kl010808itemdesc8232F0706242CAE8C0887A88606F5A2E9B996304434E",
-              "status" => true
-            }
+          if device != nil do
+            res =
+              Razer.staticqr(
+                device.short_name,
+                device.outlet.name,
+                device.outlet.mcode,
+                device.outlet.mkey,
+                device.outlet.currency
+              )
 
             Settings.update_device(device, %{"qr_code_data" => res["qrcode_data"]})
 
@@ -874,6 +944,7 @@ defmodule BlogEngineWeb.ApiController do
               sales_date: Date.utc_today(),
               outlet_id: device.outlet.id,
               device_id: device.id,
+              organization_id: device.organization_id,
               amount: amount,
               status: :pending_payment,
               uid: Ecto.UUID.generate()
@@ -945,6 +1016,7 @@ defmodule BlogEngineWeb.ApiController do
               sales_date: Date.utc_today(),
               outlet_id: outlet_item.outlet.id,
               device_id: device.id,
+              organization_id: device.organization_id,
               amount: outlet_item.price,
               status: :pending_payment,
               uid: Ecto.UUID.generate()
@@ -985,6 +1057,19 @@ defmodule BlogEngineWeb.ApiController do
           uuid = Ecto.UUID.generate()
 
           device = BlogEngine.Settings.get_device_by_name(params["name"])
+
+          params =
+            case params["value"] do
+              c when is_binary(c) ->
+                rep = Integer.parse(c) |> elem(0)
+
+                Map.put(params, "value", rep)
+
+              _ ->
+                params
+            end
+
+          IO.inspect(params)
 
           reps =
             if device.skip_first do
@@ -1036,189 +1121,10 @@ defmodule BlogEngineWeb.ApiController do
           params["_json"] |> Settings.populate_menus() |> IO.inspect()
           %{status: "ok"}
 
-        "approve_merchant" ->
-          Settings.approve_merchant(params)
-          %{status: "ok"}
-
-        "disable_merchant" ->
-          Settings.disable_merchant(params)
-          %{status: "ok"}
-
-        "do_adjustment" ->
-          Settings.approve_adjustment(params)
-          %{status: "ok"}
-
         "admin_menus" ->
           params["list"] |> Settings.update_admin_menus()
 
           %{status: "ok"}
-
-        "admin_modify_referral" ->
-          BlogEngine.Settings.change_referral(
-            params["username"],
-            params["to_new_placement_username"]
-          )
-
-          %{status: "ok"}
-
-        "admin_modify_placement" ->
-          BlogEngine.Settings.change_placement(
-            params["username"],
-            params["to_new_placement_username"],
-            params["position"]
-          )
-
-          %{status: "ok"}
-
-        "admin_insert_wallet_trx" ->
-          sample = %{user_id: 609, amount: 1100.00, remarks: "something", wallet_type: "register"}
-          ewallet = BlogEngine.Settings.get_ewallet!(params["ewallet_id"]) |> IO.inspect()
-
-          nparams =
-            params
-            |> Map.put("amount", params["amount"] |> Float.parse() |> elem(0))
-            |> Map.merge(%{"user_id" => ewallet.user_id, "wallet_type" => ewallet.wallet_type})
-            |> Enum.reduce(%{}, fn {key, value}, acc ->
-              acc |> Map.put(String.to_atom(key), value)
-            end)
-
-          BlogEngine.Settings.create_wallet_transaction(nparams)
-
-          %{status: "ok"}
-
-        "admin_register_member" ->
-          sample = %{
-            "scope" => "admin_register_member",
-            "user" => %{
-              "email" => "888@1.com",
-              "fullname" => "w2",
-              "password" => "[FILTERED]",
-              "phone" => "888",
-              "placement" => %{"position" => "left"},
-              "sponsor" => "wer1",
-              "username" => "wer2"
-            }
-          }
-
-          case Settings.register_without_products(params["user"]) do
-            {:ok, multi_res} ->
-              %{status: "ok"}
-
-            {:error, _model, changeset, succeeded} ->
-              errors = changeset.errors |> Keyword.keys()
-
-              {reason, message} = changeset.errors |> hd()
-              {proper_message, message_list} = message
-              final_reason = Atom.to_string(reason) <> " " <> proper_message
-              %{status: "error", reason: final_reason}
-          end
-
-        "mark_do" ->
-          sale = Settings.get_sale!(params["id"]) |> IO.inspect()
-
-          cond do
-            sale.status == :processing && params["status"] == "pending_delivery" ->
-              Settings.update_sale(sale, %{status: params["status"]})
-              %{status: "ok"}
-
-            sale.status == :pending_delivery && params["status"] == "sent" ->
-              Settings.mark_sent(params, sale)
-
-              %{status: "ok"}
-
-            true ->
-              nil
-              %{status: "error", reason: "already updated to #{params["status"]}"}
-          end
-
-        # params["status"]
-
-        "pay_reward" ->
-          Settings.pay_unpaid_bonus(
-            Date.from_erl!({params["year"], params["month"], params["day"]}),
-            [params["name"]]
-          )
-
-          %{status: "ok"}
-
-        "transfer_wallet" ->
-          sample = %{
-            "_csrf_token" => "Cw1XLQAKA3NeCHYCARBvKGo3WTkmGBN5ic4u_mF9mcEvRO8YSG0kkK_7",
-            "convert" => %{"user_id" => "583"},
-            "scope" => "transfer_wallet",
-            "transfer" => %{"amount" => "100.00", "username" => "summer"}
-          }
-
-          Settings.transfer_wallet(
-            params["transfer"]["user_id"],
-            params["transfer"]["username"],
-            Float.parse(params["transfer"]["amount"]) |> elem(0)
-          )
-
-        "convert_wallet" ->
-          Settings.convert_wallet(
-            params["convert"]["user_id"],
-            Float.parse(params["convert"]["amount"]) |> elem(0)
-          )
-
-        "approve_merchant_withdrawal" ->
-          params["id"]
-          |> Settings.approve_merchant_withdrawal()
-          |> case do
-            {:ok, _res} ->
-              %{status: "ok"}
-
-            {:error, "already paid"} ->
-              %{status: "error", reason: "already paid"}
-
-            _ ->
-              %{status: "error"}
-          end
-
-        "approve_withdrawal_batch" ->
-          params["id"]
-          |> Settings.approve_withdrawal_batch()
-          |> case do
-            {:ok, _res} ->
-              %{status: "ok"}
-
-            {:error, "already paid"} ->
-              %{status: "error", reason: "already paid"}
-
-            _ ->
-              %{status: "error"}
-          end
-
-        "approve_topup" ->
-          case Settings.approve_topup(params) do
-            {:ok, multi_res} ->
-              %{status: "ok"}
-
-            {:error, "already approved"} ->
-              %{status: "error", reason: "already approved"}
-
-            _ ->
-              %{status: "error", reason: "unknown"}
-          end
-
-        "manual_approve_fpx" ->
-          with payment <-
-                 Settings.get_payment_by_billplz_code(params["id"]),
-               true <- payment != nil,
-               true <- payment.sales != nil,
-               sales <- payment.sales,
-               {:ok, register_params} <- sales.registration_details |> Jason.decode() do
-            case Settings.register(register_params["user"], sales) do
-              {:ok, multi_res} ->
-                %{status: "ok", res: multi_res |> BluePotion.sanitize_struct()}
-
-              _ ->
-                %{status: "error"}
-            end
-          else
-            _ ->
-              %{status: "ok"}
-          end
 
         "sign_in" ->
           # admin login
@@ -1239,148 +1145,13 @@ defmodule BlogEngineWeb.ApiController do
                 id: user.id,
                 status: "ok",
                 res: token,
+                user: user |> BluePotion.sanitize_struct(),
                 role_app_routes:
                   user.role.app_routes |> Enum.map(&(&1 |> BluePotion.sanitize_struct()))
               }
 
             {false, _res} ->
               %{status: "error", reason: "Invalid credentials"}
-          end
-
-        "topup" ->
-          case Settings.create_topup_transaction(params) do
-            {:ok, multi_res} ->
-              %{status: "ok", res: multi_res.payment |> BluePotion.sanitize_struct()}
-
-            _ ->
-              %{status: "error"}
-          end
-
-        "merchant_checkout" ->
-          # get the billplz link first, then make payment
-          # create the sales first
-          # Settings.register(params["user"])
-
-          case Settings.create_sales_transaction(params) |> IO.inspect() do
-            {:ok, multi_res} ->
-              %{status: "ok", res: multi_res.payment |> BluePotion.sanitize_struct()}
-
-            {:error, "Please check cart items."} ->
-              %{status: "error", reason: "Please check cart items."}
-
-            {:error, :payment, "not sufficient", passed_cg} ->
-              %{status: "error", reason: "wallet balance not sufficient"}
-
-            _ ->
-              %{status: "error"}
-          end
-
-        "redeem" ->
-          # get the billplz link first, then make payment
-          # create the sales first
-          # Settings.register(params["user"])
-
-          case Settings.create_sales_transaction(params) |> IO.inspect() do
-            {:ok, multi_res} ->
-              %{status: "ok", res: multi_res.payment |> BluePotion.sanitize_struct()}
-
-            {:error, "Please check cart items."} ->
-              %{status: "error", reason: "Please check cart items."}
-
-            {:error, :payment, "not sufficient", passed_cg} ->
-              %{status: "error", reason: "wallet balance not sufficient"}
-
-            _ ->
-              %{status: "error"}
-          end
-
-        "upgrade" ->
-          # get the billplz link first, then make payment
-          # create the sales first
-          # Settings.register(params["user"])
-
-          sales_person = Settings.get_user!(params["user"]["sales_person_id"])
-
-          with true <-
-                 params["user"]["upgrade"] == "" ||
-                   params["user"]["upgrade"] == sales_person.username,
-               true <- params["user"]["payment"]["method"] == "register_point" do
-            %{status: "error", reason: "Cannot use DRP on self."}
-          else
-            _ ->
-              case Settings.create_sales_transaction(params) |> IO.inspect() do
-                {:ok, multi_res} ->
-                  %{
-                    status: "ok",
-                    res: multi_res.payment |> Map.delete(:user) |> BluePotion.sanitize_struct()
-                  }
-
-                {:error, "Please check cart items."} ->
-                  %{status: "error", reason: "Please check cart items."}
-
-                {:error, "Too much drp used."} ->
-                  %{status: "error", reason: "Too much drp used."}
-
-                {:error, :payment, "not sufficient", passed_cg} ->
-                  %{status: "error", reason: "wallet balance not sufficient"}
-
-                _ ->
-                  %{status: "error"}
-              end
-          end
-
-        "link_register" ->
-          # get the billplz link first, then make payment
-          # create the sales first
-          # Settings.register(params["user"])
-          case Settings.create_sales_transaction(params) |> IO.inspect() do
-            {:ok, multi_res} ->
-              %{status: "ok", res: multi_res.payment |> BluePotion.sanitize_struct()}
-
-            {:error, :payment, "not sufficient", passed_cg} ->
-              %{status: "error", reason: "wallet balance not sufficient"}
-
-            {:error, "Too much drp used."} ->
-              %{status: "error", reason: "Too much drp used."}
-
-            {:error, "Please enter a password."} ->
-              %{status: "error", reason: "Please enter a password."}
-
-            {:error, "Please check cart items."} ->
-              %{status: "error", reason: "Please check cart items."}
-
-            {:error, "Sponsor cannot be Shopper to register new member."} ->
-              %{status: "error", reason: "sponsor cannot be Shopper to register new member."}
-
-            _ ->
-              %{status: "error", reason: "Please contact admin."}
-          end
-
-        "register" ->
-          # get the billplz link first, then make payment
-          # create the sales first
-          # Settings.register(params["user"])
-          case Settings.create_sales_transaction(params) |> IO.inspect() do
-            {:ok, multi_res} ->
-              %{status: "ok", res: multi_res.payment |> BluePotion.sanitize_struct()}
-
-            {:error, :payment, "not sufficient", passed_cg} ->
-              %{status: "error", reason: "wallet balance not sufficient"}
-
-            {:error, "Too much drp used."} ->
-              %{status: "error", reason: "Too much drp used."}
-
-            {:error, "Please enter a password."} ->
-              %{status: "error", reason: "Please enter a password."}
-
-            {:error, "Please check cart items."} ->
-              %{status: "error", reason: "Please check cart items."}
-
-            {:error, "Sponsor cannot be Shopper to register new member."} ->
-              %{status: "error", reason: "sponsor cannot be Shopper to register new member."}
-
-            _ ->
-              %{status: "error", reason: "Please contact admin."}
           end
 
         "override" ->
@@ -1508,19 +1279,6 @@ defmodule BlogEngineWeb.ApiController do
   end
 
   def append_params(params) do
-    parent_id = Map.get(params, "parent_id")
-
-    params =
-      if parent_id != nil do
-        params
-        |> Map.put(
-          "parent_id",
-          BlogEngine.Settings.decode_corporate_account_token(parent_id).id
-        )
-      else
-        params
-      end
-
     password = Map.get(params, "password")
 
     params =
@@ -1589,6 +1347,12 @@ defmodule BlogEngineWeb.ApiController do
       |> Module.concat()
 
     IO.inspect(mod)
+
+    booleans =
+      BluePotion.test_module(model)
+      |> Map.to_list()
+      |> Enum.filter(&(elem(&1, 1) == :boolean))
+      |> Enum.map(&(elem(&1, 0) |> Atom.to_string()))
 
     dynamic_code =
       if Map.get(params, model) |> Map.get("id") != "0" do
@@ -1678,6 +1442,7 @@ defmodule BlogEngineWeb.ApiController do
           p
       end
 
+    p = booleans |> Enum.reduce(p, &BlogEngine.Settings.append_bool_key(&2, &1))
     {result, _values} = Code.eval_string(dynamic_code, params: p |> BlogEngine.upload_file())
 
     IO.inspect(result)
@@ -1742,6 +1507,7 @@ defmodule BlogEngineWeb.ApiController do
         "pageLength",
         "additional_join_statements",
         "additional_search_queries",
+        "additional_order_statements",
         "columns",
         "draw",
         "foo",
@@ -1831,6 +1597,63 @@ defmodule BlogEngineWeb.ApiController do
         |> Enum.join("")
         |> IO.inspect()
       end
+
+    Logger.info("additional_join_statements - #{additional_join_statements}")
+    additional_order_statements = Map.get(params, "additional_order_statements", [])
+
+    jkeys =
+      if params["additional_join_statements"] != nil do
+        params["additional_join_statements"]
+        |> Jason.decode!()
+        |> Enum.map(&(&1 |> Map.keys() |> List.first()))
+        |> IO.inspect()
+      else
+        []
+      end
+
+    additional_order_statements =
+      if additional_order_statements != [] do
+        for item <- additional_order_statements |> Jason.decode!() do
+          sample = %{"column" => "code", "dir" => "desc"}
+          IO.inspect(item)
+
+          if item["column"] |> String.contains?(".") do
+            if jkeys != [] do
+              [key, col2] = String.split(item["column"], ".") |> IO.inspect()
+              dir = Map.get(item, "dir")
+              col = Map.get(item, "column")
+
+              atoms = ["b", "c", "d"]
+              index = Enum.find_index(jkeys, &(&1 == key))
+
+              "#{dir}: #{atoms |> Enum.at(index)}.#{col2}"
+            else
+              nil
+            end
+          else
+            # "|> sort_by([a,b,c,d], asc: a.#{})"
+
+            dir = Map.get(item, "dir")
+            col = Map.get(item, "column")
+            "#{dir}: a.#{col}"
+          end
+        end
+        |> Enum.reject(&(&1 == nil))
+      else
+        []
+      end
+
+    post_additional_order_statements =
+      if additional_order_statements != [] do
+        """
+        |> order_by([a,b,c,d], #{additional_order_statements |> Enum.join(",")})
+        """
+      else
+        ""
+      end
+
+    Logger.info("additional_order_statements -")
+    IO.inspect(post_additional_order_statements)
 
     additional_search_queries =
       if additional_search_queries == nil do
@@ -2101,7 +1924,8 @@ defmodule BlogEngineWeb.ApiController do
         Module.concat(["BlogEngine", "Settings", model]),
         additional_join_statements,
         additional_search_queries,
-        preloads
+        preloads,
+        post_additional_order_statements
       )
 
     %{data: data, draw: _draw, recordsFiltered: _recordsFiltered, recordsTotal: _recordsTotal} =
