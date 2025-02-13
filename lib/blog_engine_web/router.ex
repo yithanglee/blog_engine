@@ -71,6 +71,7 @@ defmodule BlogEngineWeb.Router do
   scope "/api", BlogEngineWeb do
     pipe_through :browser_blank
 
+    post "/callback/razer", PageController, :notification
     post "/notification/razer", PageController, :notification
   end
 

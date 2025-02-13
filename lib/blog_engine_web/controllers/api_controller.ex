@@ -613,9 +613,296 @@ defmodule BlogEngineWeb.ApiController do
   end
 
   @doc """
-    
+     
     BlogEngineWeb.ApiController.ipay88_payment(%Plug.Conn{}, p)
   """
+
+  def razer_payment(conn, params) do
+    IO.inspect(params)
+
+    sample = %{
+      "ActionType" => "",
+      "Amount" => "1.00",
+      "AuthCode" => "20240610MBBEMYKL03008551608",
+      "BankMID" => "",
+      "CCName" => "",
+      "CCNo" => "",
+      "Currency" => "MYR",
+      "ErrDesc" => "",
+      "MerchantCode" => "M15137",
+      "PaymentId" => "888",
+      "RecurringRefno" => "",
+      "RefNo" => "TST260",
+      "Remark" => "test",
+      "S_bankname" => "",
+      "S_country" => "",
+      "Signature" => "45740fa0c2f04e2525b3008e80cf41c635ae25da34e89f1cb76e3afe52bae960",
+      "Status" => "1",
+      "SubscriptionNo" => "",
+      "TokenId" => "",
+      "TranDate" => "2024-06-10",
+      "TransId" => "T081892456524",
+      "Xfield1" => "",
+      "Xfield2" => "",
+      "Xfield3" => "",
+      "Xfield4" => "",
+      "Xfield5" => "",
+      "optional" => ""
+    }
+
+    fiuu_sample = %{
+      "amount" => "3.00",
+      "appcode" => "",
+      "channel" => "RPP_DuitNowQR",
+      "currency" => "RM",
+      "domain" => "djtechplt_Dev",
+      "error_code" => "",
+      "error_desc" => "",
+      "extraP" =>
+        "{\"DbtrAgt\":\"MBBEMYKL\",\"DbtrAcct_Type\":\"SVGS\",\"TxnType\":\"DOMESTIC\",\"refundability\":\"true\",\"bank_issuer\":\"Maybank Berhad\",\"duitnowqr_indicator\":\"20241225MBBEMYKL030OQR73397985\"}",
+      "orderid" => "SO2729",
+      "paydate" => "2024-12-25 10:51:03",
+      "skey" => "958bdf2c55f373aded4271b10c95082c",
+      "status" => "00",
+      "tranID" => "2593597375"
+    }
+
+    paynow_sample = %{
+      "amount" => "1.00",
+      "appcode" => "",
+      "channel" => "PayNow-Offline_MP",
+      "currency" => "SGD",
+      "domain" => "djtechplt_Dev",
+      "error_code" => "",
+      "error_desc" => "",
+      "nbcb" => "1",
+      "orderid" => "d48a-fc602",
+      "paydate" => "2025-01-09 13:47:28",
+      "skey" => "d3902c63243c7e911b0c62840b4ba831",
+      "status" => "00",
+      "tranID" => "2627363301"
+    }
+
+    order = params
+
+    sale =
+      BlogEngine.Settings.get_sale!(
+        Map.get(order, "orderid")
+        |> String.replace("#{Application.get_env(:blog_engine, :revenue_monster)[:prefix]}", "")
+      )
+      |> IO.inspect()
+
+    outlet = BlogEngine.Settings.get_outlet!(sale.outlet_id)
+    # status = Map.get(params, "Status") |> IO.inspect()
+    status = Map.get(params, "status") |> IO.inspect()
+
+    if sale.status != :complete do
+      case status do
+        "00" ->
+          nil
+          uuid = Ecto.UUID.generate()
+
+          device = sale.device
+
+          device = device |> Repo.preload(:executor_board)
+
+          executor_board = device.executor_board
+
+          device =
+            if executor_board != nil do
+              executor_board
+            else
+              device
+            end
+
+          items = sale.sales_items |> IO.inspect()
+
+          item =
+            if items != [] do
+              item = items |> List.first() |> Map.get(:item)
+
+              item =
+                if item == nil do
+                  amount =
+                    sale.sales_items
+                    |> List.first()
+                    |> Map.get(:item_name)
+                    |> String.replace("User fill ", "")
+                    |> Integer.parse()
+                    |> elem(0)
+
+                  reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
+
+                  %{reps: reps, delay: 0.5, name: "User fill #{amount}"}
+                else
+                  item
+                end
+            else
+              amount = sale.amount
+
+              reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
+
+              %{reps: reps, delay: 0.5, name: "User fill #{amount}"}
+            end
+
+          reps =
+            if device.skip_first do
+              item.reps - 1
+            else
+              item.reps
+            end
+
+          {delay, reps} =
+            if reps == 0 do
+              {0.01, 1}
+            else
+              {item.delay, reps}
+            end
+
+          format = device.format
+
+          if device.is_cloridge do
+            CloridgeAPI.send_message(reps, device.cloridge_device_uid)
+          else
+            BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
+              "action" => "start",
+              "format" => format,
+              "reps" => reps,
+              "delay" => delay,
+              "uuid" => uuid,
+              "pin" => device.default_io_pin
+            })
+          end
+
+          BlogEngine.Settings.create_device_log(%{
+            device_id: device.id,
+            uuid: uuid,
+            job_content:
+              Jason.encode!(%{
+                "action" => "start",
+                "reps" => item.reps,
+                "delay" => item.delay,
+                "uuid" => uuid,
+                "pin" => device.default_io_pin
+              }),
+            remarks:
+              "sales id:#{sale.id} start #{item.name} with reps: #{item.reps} delay: #{item.delay} on pin #{device.default_io_pin}"
+          })
+          |> IO.inspect()
+
+          BlogEngine.Settings.update_sale(sale, %{
+            payment_webhook: params |> Jason.encode!(),
+            status: :complete
+          })
+          |> IO.inspect()
+
+        "1" ->
+          nil
+
+          uuid = Ecto.UUID.generate()
+
+          device = sale.device
+
+          device = device |> Repo.preload(:executor_board)
+
+          executor_board = device.executor_board
+
+          device =
+            if executor_board != nil do
+              executor_board
+            else
+              device
+            end
+
+          items = sale.sales_items |> IO.inspect()
+
+          item =
+            if items != [] do
+              item = items |> List.first() |> Map.get(:item)
+
+              item =
+                if item == nil do
+                  amount =
+                    sale.sales_items
+                    |> List.first()
+                    |> Map.get(:item_name)
+                    |> String.replace("User fill ", "")
+                    |> Integer.parse()
+                    |> elem(0)
+
+                  reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
+
+                  %{reps: reps, delay: 0.5, name: "User fill #{amount}"}
+                else
+                  item
+                end
+            else
+              amount = sale.amount
+
+              reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
+
+              %{reps: reps, delay: 0.5, name: "User fill #{amount}"}
+            end
+
+          reps =
+            if device.skip_first do
+              item.reps - 1
+            else
+              item.reps
+            end
+
+          {delay, reps} =
+            if reps == 0 do
+              {0.01, 1}
+            else
+              {item.delay, reps}
+            end
+
+          format = device.format
+
+          if device.is_cloridge do
+            CloridgeAPI.send_message(reps, device.cloridge_device_uid)
+          else
+            BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
+              "action" => "start",
+              "format" => format,
+              "reps" => reps,
+              "delay" => delay,
+              "uuid" => uuid,
+              "pin" => device.default_io_pin
+            })
+          end
+
+          BlogEngine.Settings.create_device_log(%{
+            device_id: device.id,
+            uuid: uuid,
+            job_content:
+              Jason.encode!(%{
+                "action" => "start",
+                "reps" => item.reps,
+                "delay" => item.delay,
+                "uuid" => uuid,
+                "pin" => device.default_io_pin
+              }),
+            remarks:
+              "sales id:#{sale.id} start #{item.name} with reps: #{item.reps} delay: #{item.delay} on pin #{device.default_io_pin}"
+          })
+          |> IO.inspect()
+
+          BlogEngine.Settings.update_sale(sale, %{
+            payment_webhook: params |> Jason.encode!(),
+            status: :complete
+          })
+          |> IO.inspect()
+
+        _ ->
+          nil
+      end
+    end
+
+    json(conn, %{status: "ok"})
+  end
+
   def ipay88_payment(conn, params) do
     IO.inspect(params)
 
@@ -670,7 +957,7 @@ defmodule BlogEngineWeb.ApiController do
 
     sale =
       BlogEngine.Settings.get_sale!(
-        Map.get(order, "RefNo")
+        Map.get(order, "orderid")
         |> String.replace("#{Application.get_env(:blog_engine, :revenue_monster)[:prefix]}", "")
       )
       |> IO.inspect()

@@ -9,7 +9,7 @@
       Thank you for your payment, you can close this page now.
     </p>
     <p class="text-muted text-center">
-      <%= @conn.params["transaction_id"]%>
+      <%= @conn.params |> Map.get("tranID")%>
     </p>
     <% else %>
     <div class="d-flex flex-column justify-content-center align-items-center">
@@ -20,7 +20,7 @@
       But worry not, we will check on this asap.
     </p>
     <p class="text-muted text-center">
-      <%= @conn.params["transaction_id"]%>
+      <%= @conn.params |> Map.get("tranID")%>
     </p>
     <% end %>
   </div>
@@ -33,7 +33,7 @@
       
       window.close();
     } catch(e){
-      window.location  = "/home"
+      window.location  = "https://iot.djtech4u.com/?d=&location="
 
     }
   }, 2000)

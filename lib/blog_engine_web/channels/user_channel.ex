@@ -44,6 +44,28 @@ defmodule BlogEngineWeb.UserChannel do
   end
 
   @impl true
+  def handle_in("pwm_readings", payload, socket) do
+    device = BlogEngine.Settings.get_device_by_name(socket.assigns.uuid)
+
+    BlogEngine.Settings.create_io_reading(%{
+      device_id: device.id,
+      log: Jason.encode!(payload),
+      final_data: Map.get(payload, "pulse_count") |> Integer.to_string()
+    })
+    |> IO.inspect()
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_in("get_settings", payload, socket) do
+    device = BlogEngine.Settings.get_device_by_name(socket.assigns.uuid)
+
+    broadcast(socket, "settings_response", %{pwm_config: %{input_pin: device.reading_pin}})
+    {:noreply, socket}
+  end
+
+  @impl true
   def handle_in("pwm_response", payload, socket) do
     device = BlogEngine.Settings.get_device_by_name(socket.assigns.uuid)
 

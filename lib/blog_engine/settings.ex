@@ -135,7 +135,8 @@ defmodule BlogEngine.Settings do
   end
 
   def get_sale_by_payment_ref(id) do
-    Repo.get_by(Sale, payment_ref: id) |> Repo.preload([:device, :sales_items])
+    Repo.all(from(s in Sale, where: s.payment_ref == ^id, preload: [:device, :sales_items]))
+    |> List.first()
   end
 
   def get_sale!(id) do
@@ -233,7 +234,8 @@ defmodule BlogEngine.Settings do
   end
 
   def get_device_by_short_name(id) do
-    Repo.get_by(Device, short_name: id) |> Repo.preload(:outlet)
+    Repo.all(from(d in Device, where: ilike(d.short_name, ^"%#{id}%"), preload: [:outlet]))
+    |> List.first()
   end
 
   def get_device_by_name(id) do
@@ -1406,6 +1408,16 @@ defmodule BlogEngine.Settings do
     end
   end
 
+  @doc """
+  token = "dXjhCYBC4Jk4n7v1UdT1dP:APA91bENKcT5LzAjBGbK7SdkNVcMzF2jVLurQEu6r0K2lqgcIhxvCyWaB_6o5J8TEFG-Zpcop4iyMZJ13ZRvv9rlliHvpVf-7G4Ksyhu0o-kKBfG6kRF_GA"
+  token2 = "dbJfHLSYEKDXip3HdwnnFT:APA91bGm-8ZohPN3eS_Ml5VnMiRoZOiQt8NnKZrnqj8i_37C_mLj6C5QXedfrztCiI-3CBTCdx6tLAmwYcL_-HhAOSbejpLU16r_qQqOYmMIBIgsxI8kui8"
+  token3 = "eL1OPrje9tVktfbZYfVuZG:APA91bGKQeTRD1rB36ICGc3RC3e8I-m3ZBWHuwdl-M0tFAZALXkRL_pO3IvtqY9oQJ2h1Tx8u4UI5bfqX36C9m6NmfwDBDmv2W_HOz_qSUB42A0kbTX2iA8"
+  token4 = "eJRAfsja5FVidAk_j-OJLI:APA91bEQHMIvuFCX_7qpXJKDoNbA_wOK9_WT1mbQesdg3cF-91cn4pyk18xQc1fZWm5ZSVxRMGjdvZW7SSIIImRycJkM8vyW4KdqzOpiVcrb3mp1Hey1a7I"
+  tokens = [token, token2, token3, token4]
+
+
+  Enum.map(tokens, &   BlogEngine.Settings.fcm_publish(0, "Salam Dari DJTECH", "Anda boleh periksa keadaan mesin dari sini", &1))
+  """
   def fcm_publish(
         id,
         title,
@@ -1431,14 +1443,30 @@ defmodule BlogEngine.Settings do
     }
 
     # todo, check the error, then delete the access token
-    HTTPoison.post(
-      "https://fcm.googleapis.com/v1/projects/djtech-655dd/messages:send",
-      message |> Jason.encode!(),
-      [
-        {"content-type", "application/json"},
-        {"Authorization", "Bearer #{access_token}"}
-      ]
-    )
+
+    res =
+      HTTPoison.post(
+        "https://fcm.googleapis.com/v1/projects/djtech-655dd/messages:send",
+        message |> Jason.encode!(),
+        [
+          {"content-type", "application/json"},
+          {"Authorization", "Bearer #{access_token}"}
+        ]
+      )
+
+    case res do
+      {:ok, %HTTPoison.Response{body: body}} ->
+        keys = Jason.decode!(body) |> Map.keys()
+
+        if "error" in keys do
+          Repo.delete_all(
+            from(md in BlogEngine.Settings.MessagingDevice, where: md.uuid == ^device_token)
+          )
+        end
+
+      _ ->
+        nil
+    end
   end
 
   def update_messaging_device(model, params) do
@@ -1683,5 +1711,49 @@ defmodule BlogEngine.Settings do
         Enum.zip(columns |> Enum.map(&(&1 |> String.to_atom())), row) |> Enum.into(%{})
       end
     end
+  end
+
+  alias BlogEngine.Settings.IoReading
+
+  def list_io_readings() do
+    Repo.all(IoReading)
+  end
+
+  def get_io_reading!(id) do
+    Repo.get!(IoReading, id)
+  end
+
+  def create_io_reading(params \\ %{}) do
+    IoReading.changeset(%IoReading{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_io_reading(model, params) do
+    IoReading.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_io_reading(%IoReading{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.ReadingConversion
+
+  def list_reading_conversions() do
+    Repo.all(ReadingConversion)
+  end
+
+  def get_reading_conversion!(id) do
+    Repo.get!(ReadingConversion, id)
+  end
+
+  def create_reading_conversion(params \\ %{}) do
+    ReadingConversion.changeset(%ReadingConversion{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_reading_conversion(model, params) do
+    ReadingConversion.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_reading_conversion(%ReadingConversion{} = model) do
+    Repo.delete(model)
   end
 end

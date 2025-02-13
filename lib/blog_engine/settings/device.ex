@@ -17,6 +17,8 @@ defmodule BlogEngine.Settings.Device do
     field(:short_desc, :string)
     belongs_to(:outlet, BlogEngine.Settings.Outlet)
     field(:default_io_pin, :integer, default: 0)
+
+    field(:reading_pin, :integer, default: 16)
     belongs_to(:executor_board, BlogEngine.Settings.Device, foreign_key: :executor_board_id)
 
     belongs_to(:organization, BlogEngine.Settings.Organization)
@@ -28,6 +30,7 @@ defmodule BlogEngine.Settings.Device do
   def changeset(device, attrs) do
     device
     |> cast(attrs, [
+      :reading_pin,
       :label,
       :default_delay,
       :organization_id,

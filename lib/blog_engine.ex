@@ -47,7 +47,7 @@ defmodule BlogEngine do
           nil
           diff = DateTime.utc_now() |> DateTime.diff(last_online)
 
-          if diff > 300 && diff < 2 * 60 * 60 do
+          if diff > 5 && diff < 2 * 60 * 60 do
             # todo: findd the device outlet organization user's messaging device, 
             # and create the notification on the browser
 

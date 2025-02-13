@@ -9,7 +9,7 @@ defmodule BlogEngineWeb.PageController do
     render(conn, "override.html")
   end
 
-  def thank_you(conn, params) do
+  def _thank_you(conn, params) do
     IO.inspect(params)
 
     %{
@@ -155,8 +155,31 @@ defmodule BlogEngineWeb.PageController do
     )
   end
 
+  @doc """
+
+  BlogEngineWeb.PageController.notification(%Plug.Conn{}, params)
+
+
+  """
+
   def notification(conn, params) do
     IO.inspect(params)
+
+    test_params = %{
+      "amount" => "1.00",
+      "appcode" => "",
+      "channel" => "PayNow-Offline_MP",
+      "currency" => "SGD",
+      "domain" => "djtechplt_Dev",
+      "error_code" => "",
+      "error_desc" => "",
+      "nbcb" => "1",
+      "orderid" => "d48a-fc602",
+      "paydate" => "2025-01-09 22:33:09",
+      "skey" => "6158bfa4cecf2c9bd10dc26bbb5d2fd1",
+      "status" => "00",
+      "tranID" => "2628420327"
+    }
 
     duitnow = %{
       "amount" => "0.50",
@@ -195,7 +218,13 @@ defmodule BlogEngineWeb.PageController do
       "tranID" => "2402348820"
     }
 
-    if params["status"] == "00" do
+    tranID = Map.get(params, "tranID")
+
+    check =
+      BlogEngine.Settings.get_sale_by_payment_ref(tranID)
+      |> IO.inspect(label: "sales_by_payment_ref")
+
+    if check == nil && params["status"] == "00" do
       # probably need to check if the online trx will reach here...
 
       device = BlogEngine.Settings.get_device_by_short_name(params["orderid"])
@@ -222,6 +251,7 @@ defmodule BlogEngineWeb.PageController do
           sales = BlogEngine.Settings.get_sale!(id)
           {:ok, sales, sales.device, sales.outlet}
         else
+          # todo: add the tranID into ref then recheck for duplication
           {:ok, sales} =
             BlogEngine.Settings.create_sale(%{
               uid: Ecto.UUID.generate(),
@@ -230,7 +260,8 @@ defmodule BlogEngineWeb.PageController do
               organization_id: device.organization_id,
               device_id: device.id,
               payment_channel: "duitnowsqr",
-              sales_date: Date.utc_today()
+              sales_date: Date.utc_today(),
+              payment_ref: tranID
             })
             |> IO.inspect()
 
@@ -750,6 +781,42 @@ defmodule BlogEngineWeb.PageController do
       BlogEngineWeb.ApiController.ipay88_payment(conn, params)
     end
 
-    render(conn, "thank_you.html", params)
+    sample = %{
+      "amount" => "2.50",
+      "appcode" => "",
+      "channel" => "FPX_MB2U",
+      "currency" => "RM",
+      "domain" => "MGhaho2u",
+      "error_code" => "",
+      "error_desc" => "",
+      "extraP" => "{\"fpx_buyer_name\":\"LEE%20YIT%20HANG\",\"fpx_txn_id\":\"2403170834530847\"}",
+      "orderid" => "HAHOTOPUP42",
+      "paydate" => "2024-03-17 08:34:51",
+      "skey" => "87a101336941e8a097cc03d19e14a9e2",
+      "status" => "00",
+      "tranID" => "2065317565"
+    }
+
+    if Map.get(params, "orderid") do
+      sale =
+        BlogEngine.Settings.get_sale!(
+          Map.get(params, "orderid")
+          |> String.replace("#{Application.get_env(:blog_engine, :revenue_monster)[:prefix]}", "")
+        )
+        |> IO.inspect()
+
+      outlet = BlogEngine.Settings.get_outlet!(sale.outlet_id)
+
+      device = sale.device
+
+      conn
+      |> redirect(
+        external: "https://iot.djtech4u.com/?d=#{device.name}&location=#{outlet.subdomain}"
+      )
+    else
+      render(conn, "thank_you.html", params)
+    end
+
+    # need to redirect back to the website..
   end
 end
