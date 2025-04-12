@@ -18,6 +18,7 @@ defmodule BlogEngine.Settings.Outlet do
     field(:price_per_minutes, :float, default: 0.5)
     field(:payment_gateway, :string)
     field(:currency, :string, default: "MYR")
+    has_many(:devices, BlogEngine.Settings.Device)
     timestamps()
   end
 

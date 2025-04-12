@@ -3,6 +3,7 @@ defmodule BlogEngineWeb.ApiController do
 
   alias BlogEngine.{Repo, Settings}
   require Logger
+  require IEx
 
   def ngrok_post(conn, params) do
     final =
@@ -147,8 +148,6 @@ defmodule BlogEngineWeb.ApiController do
     json(conn, Phoenix.Controller.get_csrf_token())
   end
 
-  require IEx
-
   def get(conn, params) do
     # can get data from conn.private.plug_session
     token = params |> Map.get("token")
@@ -165,6 +164,14 @@ defmodule BlogEngineWeb.ApiController do
 
     res =
       case params["scope"] do
+        "get_create_device" ->
+          Settings.create_update_device(params)
+          |> BluePotion.sanitize_struct()
+
+        "get_organization_summary" ->
+          Settings.get_organization_summary(params["organization_id"])
+          |> BluePotion.sanitize_struct()
+
         "get_time" ->
           timestamp = DateTime.utc_now() |> DateTime.to_unix()
           %{time: timestamp}
@@ -538,17 +545,21 @@ defmodule BlogEngineWeb.ApiController do
           })
         end
 
-        BlogEngine.Settings.create_device_log(%{
-          device_id: device.id,
-          uuid: uuid,
-          job_content:
+        job_content =
+          if device.keep_pending_task do
             Jason.encode!(%{
               "action" => "start",
               "reps" => item.reps,
               "delay" => item.delay,
               "uuid" => uuid,
               "pin" => device.default_io_pin
-            }),
+            })
+          end
+
+        BlogEngine.Settings.create_device_log(%{
+          device_id: device.id,
+          uuid: uuid,
+          job_content: job_content,
           remarks:
             "sales id:#{sale.id} start #{item.name} with reps: #{item.reps} delay: #{item.delay} on pin #{device.default_io_pin}"
         })
@@ -774,17 +785,21 @@ defmodule BlogEngineWeb.ApiController do
             })
           end
 
-          BlogEngine.Settings.create_device_log(%{
-            device_id: device.id,
-            uuid: uuid,
-            job_content:
+          job_content =
+            if device.keep_pending_task do
               Jason.encode!(%{
                 "action" => "start",
                 "reps" => item.reps,
                 "delay" => item.delay,
                 "uuid" => uuid,
                 "pin" => device.default_io_pin
-              }),
+              })
+            end
+
+          BlogEngine.Settings.create_device_log(%{
+            device_id: device.id,
+            uuid: uuid,
+            job_content: job_content,
             remarks:
               "sales id:#{sale.id} start #{item.name} with reps: #{item.reps} delay: #{item.delay} on pin #{device.default_io_pin}"
           })
@@ -873,17 +888,21 @@ defmodule BlogEngineWeb.ApiController do
             })
           end
 
-          BlogEngine.Settings.create_device_log(%{
-            device_id: device.id,
-            uuid: uuid,
-            job_content:
+          job_content =
+            if device.keep_pending_task do
               Jason.encode!(%{
                 "action" => "start",
                 "reps" => item.reps,
                 "delay" => item.delay,
                 "uuid" => uuid,
                 "pin" => device.default_io_pin
-              }),
+              })
+            end
+
+          BlogEngine.Settings.create_device_log(%{
+            device_id: device.id,
+            uuid: uuid,
+            job_content: job_content,
             remarks:
               "sales id:#{sale.id} start #{item.name} with reps: #{item.reps} delay: #{item.delay} on pin #{device.default_io_pin}"
           })
@@ -1044,17 +1063,21 @@ defmodule BlogEngineWeb.ApiController do
             })
           end
 
-          BlogEngine.Settings.create_device_log(%{
-            device_id: device.id,
-            uuid: uuid,
-            job_content:
+          job_content =
+            if device.keep_pending_task do
               Jason.encode!(%{
                 "action" => "start",
                 "reps" => item.reps,
                 "delay" => item.delay,
                 "uuid" => uuid,
                 "pin" => device.default_io_pin
-              }),
+              })
+            end
+
+          BlogEngine.Settings.create_device_log(%{
+            device_id: device.id,
+            uuid: uuid,
+            job_content: job_content,
             remarks:
               "sales id:#{sale.id} start #{item.name} with reps: #{item.reps} delay: #{item.delay} on pin #{device.default_io_pin}"
           })
@@ -1143,17 +1166,21 @@ defmodule BlogEngineWeb.ApiController do
             })
           end
 
-          BlogEngine.Settings.create_device_log(%{
-            device_id: device.id,
-            uuid: uuid,
-            job_content:
+          job_content =
+            if device.keep_pending_task do
               Jason.encode!(%{
                 "action" => "start",
                 "reps" => item.reps,
                 "delay" => item.delay,
                 "uuid" => uuid,
                 "pin" => device.default_io_pin
-              }),
+              })
+            end
+
+          BlogEngine.Settings.create_device_log(%{
+            device_id: device.id,
+            uuid: uuid,
+            job_content: job_content,
             remarks:
               "sales id:#{sale.id} start #{item.name} with reps: #{item.reps} delay: #{item.delay} on pin #{device.default_io_pin}"
           })
@@ -1173,9 +1200,33 @@ defmodule BlogEngineWeb.ApiController do
     json(conn, %{status: "ok"})
   end
 
+  def another_call(params) do
+    Process.sleep(2000)
+
+    case HTTPoison.post(
+           params["callback_url"],
+           params |> Jason.encode!(),
+           [{"Content-Type", "application/json"}]
+         )
+         |> IO.inspect(label: "callback ation") do
+      {:ok,
+       %HTTPoison.Response{
+         body: body
+       } = _res} ->
+        body
+
+      _ ->
+        nil
+    end
+  end
+
   def post(conn, params) do
     res =
       case params["scope"] do
+        "simulate_sales" ->
+          Elixir.Task.start(__MODULE__, :another_call, [params])
+          %{status: "ok", res: params}
+
         "user_fcm_token" ->
           check_staff = params["user_token"] |> BlogEngine.Settings.get_cookie_user_by_cookie()
 
@@ -1387,17 +1438,21 @@ defmodule BlogEngineWeb.ApiController do
             })
           end
 
-          BlogEngine.Settings.create_device_log(%{
-            device_id: device.id,
-            uuid: uuid,
-            job_content:
+          job_content =
+            if device.keep_pending_task do
               Jason.encode!(%{
                 "action" => params["action"],
                 "reps" => params["value"],
                 "delay" => params["delay"],
                 "uuid" => uuid,
                 "pin" => device.default_io_pin
-              }),
+              })
+            end
+
+          BlogEngine.Settings.create_device_log(%{
+            device_id: device.id,
+            uuid: uuid,
+            job_content: job_content,
             remarks:
               "manual start #{format} #{params["item_name"]} on pin #{device.default_io_pin}"
           })

@@ -19,10 +19,11 @@ defmodule BlogEngine do
           on: r.id == s.role_id,
           left_join: md in Settings.MessagingDevice,
           on: md.staff_id == s.id,
-          where: r.name in ^["Owner", "Admin"],
-          select: [md.uuid]
+          where: r.name in ^["Owner", "Admin", "admin"],
+          select: md.uuid
         )
       )
+      |> IO.inspect(label: "admins")
 
     device_ids =
       Repo.all(
@@ -35,6 +36,7 @@ defmodule BlogEngine do
           on: s.organization_id == og.id,
           left_join: md in Settings.MessagingDevice,
           on: md.staff_id == s.id,
+          where: d.is_active == true,
           select: %{id: d.id, label: d.label, outlet_name: o.name, uuid: md.uuid}
         )
       )
@@ -47,24 +49,23 @@ defmodule BlogEngine do
           nil
           diff = DateTime.utc_now() |> DateTime.diff(last_online)
 
-          if diff > 5 && diff < 2 * 60 * 60 do
-            # todo: findd the device outlet organization user's messaging device, 
+          if diff > 120 && diff < 2 * 60 * 60 do
+            # todo: findd the device outlet organization user's messaging device,
             # and create the notification on the browser
-
-            BlogEngine.Settings.fcm_publish(
+            Elixir.Task.start_link(BlogEngine.Settings, :fcm_publish, [
               0,
               "Device Online Checker",
               "#{outlet_name}'s #{label} is not online. Checked #{timestamp} ",
               uuid
-            )
+            ])
 
             for admin_uuid <- admins do
-              BlogEngine.Settings.fcm_publish(
+              Elixir.Task.start_link(BlogEngine.Settings, :fcm_publish, [
                 0,
                 "Device Online Checker",
                 "#{outlet_name}'s #{label} is not online. Checked #{timestamp}",
                 admin_uuid
-              )
+              ])
             end
           end
 
@@ -168,7 +169,7 @@ defmodule BlogEngine do
         random_id = makeid(4)
         #{singular}Source = new phoenixModel({
           columns: [
-          
+
             { label: 'id', data: 'id' },
             { label: 'Action', data: 'id' }
 
@@ -238,7 +239,7 @@ defmodule BlogEngine do
                   $("#myModal").modal('hide')
                 },
                 fnParams: {
-                 
+
                 }
               }, ],
               tableSelector: "#" + random_id
@@ -325,7 +326,7 @@ defmodule BlogEngine do
 
 
 
-          // new lines 
+          // new lines
 
 
           <script>
@@ -392,7 +393,7 @@ defmodule BlogEngine do
             };
           };
 
-          // new lines 
+          // new lines
 
 
 
@@ -450,9 +451,9 @@ defmodule BlogEngine do
             confirmModal(
               true,
               `
-              <label class="my-4 text-sm font-medium block 
+              <label class="my-4 text-sm font-medium block
               text-gray-900 dark:text-gray-300 space-y-2">
-              <span>Shipping Ref</span>  <input name="shipping_ref" 
+              <span>Shipping Ref</span>  <input name="shipping_ref"
               placeholder="" type="text" class="block w-75 disabled:cursor-not-allowed disabled:opacity-50 p-2.5 focus:border-primary-500 focus:ring-primary-500 dark:focus:border-primary-500 dark:focus:ring-primary-500 bg-gray-50 text-gray-900 dark:bg-gray-600 dark:text-white dark:placeholder-gray-400 border-gray-300 dark:border-gray-500 text-sm rounded-lg"> </label>
               <span class="">Are you sure to mark this order as sent?</span>`,
               () => {

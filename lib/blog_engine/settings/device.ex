@@ -18,6 +18,9 @@ defmodule BlogEngine.Settings.Device do
     belongs_to(:outlet, BlogEngine.Settings.Outlet)
     field(:default_io_pin, :integer, default: 0)
 
+    field(:is_rs232, :boolean, default: false)
+    field(:is_round_down, :boolean, default: true)
+    field(:keep_pending_task, :boolean, default: true)
     field(:reading_pin, :integer, default: 16)
     belongs_to(:executor_board, BlogEngine.Settings.Device, foreign_key: :executor_board_id)
 
@@ -30,6 +33,9 @@ defmodule BlogEngine.Settings.Device do
   def changeset(device, attrs) do
     device
     |> cast(attrs, [
+      :is_rs232,
+      :is_round_down,
+      :keep_pending_task,
       :reading_pin,
       :label,
       :default_delay,

@@ -82,6 +82,15 @@ defmodule BlogEngineWeb.Router do
     post("/webhook", ApiController, :ngrok_post)
   end
 
+  scope "/iot", BlogEngineWeb do
+    pipe_through :plain_api
+    get "/stream", ApiController, :stream_get
+    options("/:webhook", ApiController, :get)
+
+    get "/webhook", ApiController, :get
+    post "/webhook", ApiController, :post
+  end
+
   scope "/cloridge", BlogEngineWeb do
     pipe_through :svt_api
     get "/stream", ApiController, :stream_get

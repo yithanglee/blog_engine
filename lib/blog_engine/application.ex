@@ -6,6 +6,10 @@ defmodule BlogEngine.Application do
   use Application
 
   def start(_type, _args) do
+    :logger.add_handler(:my_sentry_handler, Sentry.LoggerHandler, %{
+      config: %{metadata: [:file, :line]}
+    })
+
     source =
       {:service_account,
        File.read!("#{Application.app_dir(:blog_engine) <> "/priv/static"}/service-account.json")

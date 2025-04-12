@@ -65,6 +65,7 @@ defmodule BlogEngine.MixProject do
       {:web_push_encryption, "~> 0.3"},
       {:timex, "~> 3.0"},
       {:soap, "~> 1.1.1"},
+      {:sentry, "~> 10.2.0"},
       {:quantum, "~> 2.0"}
     ]
   end

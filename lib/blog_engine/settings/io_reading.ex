@@ -3,10 +3,11 @@ defmodule BlogEngine.Settings.IoReading do
   import Ecto.Changeset
 
   schema "io_readings" do
-    field :device_id, :integer
-    field :final_data, :string
-    field :is_processed, :boolean, default: false
-    field :log, :binary
+    # field :device_id, :integer
+    belongs_to(:device, BlogEngine.Settings.Device)
+    field(:final_data, :string)
+    field(:is_processed, :boolean, default: false)
+    field(:log, :binary)
 
     timestamps()
   end

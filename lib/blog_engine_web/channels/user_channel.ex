@@ -61,7 +61,21 @@ defmodule BlogEngineWeb.UserChannel do
   def handle_in("get_settings", payload, socket) do
     device = BlogEngine.Settings.get_device_by_name(socket.assigns.uuid)
 
-    broadcast(socket, "settings_response", %{pwm_config: %{input_pin: device.reading_pin}})
+    is_bill_acceptor = fn ->
+      if device.is_rs232 do
+        "bill_acceptor"
+      else
+        "pwm_machine"
+      end
+    end
+
+    broadcast(socket, "settings_response", %{
+      rs232_config: %{
+        device_type: is_bill_acceptor.()
+      },
+      pwm_config: %{input_pin: device.reading_pin}
+    })
+
     {:noreply, socket}
   end
 

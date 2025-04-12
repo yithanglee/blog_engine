@@ -235,7 +235,13 @@ defmodule BlogEngineWeb.PageController do
             if amt < 0 do
               1.0
             else
-              amt |> Float.floor()
+              # todo: add device round_down
+
+              if device.is_round_down do
+                amt |> Float.floor()
+              else
+                amt |> Float.round(1)
+              end
             end
 
           _ ->
@@ -348,17 +354,21 @@ defmodule BlogEngineWeb.PageController do
         })
       end
 
-      BlogEngine.Settings.create_device_log(%{
-        device_id: device.id,
-        uuid: uuid,
-        job_content:
+      job_content =
+        if device.keep_pending_task do
           Jason.encode!(%{
             "action" => "start",
             "reps" => item.reps,
             "delay" => item.delay,
             "uuid" => uuid,
             "pin" => device.default_io_pin
-          }),
+          })
+        end
+
+      BlogEngine.Settings.create_device_log(%{
+        device_id: device.id,
+        uuid: uuid,
+        job_content: job_content,
         remarks:
           "sales id:#{sale.id} start #{item.name} with reps: #{item.reps} delay: #{item.delay} on pin #{device.default_io_pin}"
       })

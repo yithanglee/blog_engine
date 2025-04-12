@@ -26,6 +26,7 @@ defmodule BlogEngine.Settings.Sale do
     belongs_to(:outlet, BlogEngine.Settings.Outlet)
     # field(:outlet_id, :integer)
     # field(:device_id, :integer)
+    field(:sales_type, :string, default: "offline")
     belongs_to(:device, BlogEngine.Settings.Device)
 
     has_many(:sales_items, BlogEngine.Settings.SalesItem, foreign_key: :sales_id)
@@ -45,6 +46,7 @@ defmodule BlogEngine.Settings.Sale do
   def changeset(sale, attrs) do
     sale
     |> cast(attrs, [
+      :sales_type,
       :organization_id,
       :payment_url,
       :uid,

@@ -921,7 +921,14 @@ defmodule Razer do
         vkey
       ) do
     server_url = Application.get_env(:blog_engine, :url)
-    payment = CommerceFront.Settings.get_payment_by_billplz_code(reference_no) |> IO.inspect()
+
+    payment = %{
+      wallet_topup: nil,
+      sales: %{
+        registration_details:
+          Jason.encode!(%{user: %{shipping: %{fullname: "DJTECH", phone: "0122664254"}}})
+      }
+    }
 
     user =
       if payment.wallet_topup != nil do

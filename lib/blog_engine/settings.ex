@@ -104,6 +104,10 @@ defmodule BlogEngine.Settings do
     Repo.all(Outlet)
   end
 
+  def list_outlets_by_organization(organization_id) do
+    Repo.all(from(o in Outlet, where: o.organization_id == ^organization_id))
+  end
+
   def get_outlet_by_subdomain(id) do
     Repo.get_by(Outlet, subdomain: id)
   end
@@ -264,7 +268,8 @@ defmodule BlogEngine.Settings do
 
     case res do
       {:ok, d} ->
-        CloridgeAPI.initial_setup(d.cloridge_device_uid)
+        # CloridgeAPI.initial_setup(d.cloridge_device_uid)
+        nil
 
       _ ->
         nil
@@ -312,7 +317,10 @@ defmodule BlogEngine.Settings do
 
   def get_cookie_user_by_cookie(cookie) do
     Repo.all(
-      from(s in SessionUser, where: s.cookie == ^cookie, preload: [user: [role: :app_routes]])
+      from(s in SessionUser,
+        where: s.cookie == ^cookie,
+        preload: [user: [:organization, role: :app_routes]]
+      )
     )
     |> List.first()
   end
@@ -632,7 +640,10 @@ defmodule BlogEngine.Settings do
   def check_staff_password(params) do
     users =
       Repo.all(
-        from(u in Staff, where: u.username == ^params["username"], preload: [role: :app_routes])
+        from(u in Staff,
+          where: u.username == ^params["username"],
+          preload: [:organization, role: :app_routes]
+        )
       )
       |> IO.inspect()
 
@@ -1409,11 +1420,11 @@ defmodule BlogEngine.Settings do
   end
 
   @doc """
-  token = "dXjhCYBC4Jk4n7v1UdT1dP:APA91bENKcT5LzAjBGbK7SdkNVcMzF2jVLurQEu6r0K2lqgcIhxvCyWaB_6o5J8TEFG-Zpcop4iyMZJ13ZRvv9rlliHvpVf-7G4Ksyhu0o-kKBfG6kRF_GA"
-  token2 = "dbJfHLSYEKDXip3HdwnnFT:APA91bGm-8ZohPN3eS_Ml5VnMiRoZOiQt8NnKZrnqj8i_37C_mLj6C5QXedfrztCiI-3CBTCdx6tLAmwYcL_-HhAOSbejpLU16r_qQqOYmMIBIgsxI8kui8"
-  token3 = "eL1OPrje9tVktfbZYfVuZG:APA91bGKQeTRD1rB36ICGc3RC3e8I-m3ZBWHuwdl-M0tFAZALXkRL_pO3IvtqY9oQJ2h1Tx8u4UI5bfqX36C9m6NmfwDBDmv2W_HOz_qSUB42A0kbTX2iA8"
+  token = "cxA382NUQHilGS5bG2_MLC:APA91bG6Pjr7WIQhQoZxydY-HdAMshjlwJlw2CRomvoeaY5PH6k4jfGKKIyFfoCe6Sk5r01fLpdZL5hHf8ZtZEXuhb2zhpoK_oxFvCDEPkJutGuobE_v4kM"
+  token2 = "e93U-8-eR5qKAwJxeAmSnv:APA91bFNUaplqITRXqUgS0B2nQbGREqivZ43zo2W0X8arghHRZfwhDntRpwUkMxTn-0s6PRIc5VnSwPZXvt8ayc4jfPQKZht9XHhB0BXAAzOAMezP_i_lX8"
+  token3 = "cCUrkp9MTKqAtxZDHtn98k:APA91bExUa1DgRF8KkpwDeH3I6pWIwCkA5wlH_QXs1HUlnJoj0cQ5rWwuI90h1PPiz1aPPauXbAw1GNyfl_2z8Yv71QRvLxoOO74wbXktSGIBqyHk2R_ibs"
   token4 = "eJRAfsja5FVidAk_j-OJLI:APA91bEQHMIvuFCX_7qpXJKDoNbA_wOK9_WT1mbQesdg3cF-91cn4pyk18xQc1fZWm5ZSVxRMGjdvZW7SSIIImRycJkM8vyW4KdqzOpiVcrb3mp1Hey1a7I"
-  tokens = [token, token2, token3, token4]
+  tokens = [token, token2, token3]
 
 
   Enum.map(tokens, &   BlogEngine.Settings.fcm_publish(0, "Salam Dari DJTECH", "Anda boleh periksa keadaan mesin dari sini", &1))
@@ -1426,46 +1437,70 @@ defmodule BlogEngine.Settings do
       ) do
     access_token = Goth.fetch!(BlogEngine.Goth).token
 
-    message = %{
-      "message" => %{
-        "token" => device_token,
-        "notification" => %{
-          "title" => title,
-          "body" => body
-        },
-        "data" => %{
-          "id" => "#{id}",
-          "path" => "orders",
-          "created_at" => Date.utc_today(),
-          "click_action" => "FLUTTER_NOTIFICATION_CLICK"
+    if device_token != nil do
+      message = %{
+        "message" => %{
+          "token" => device_token,
+          "notification" => %{
+            "title" => title,
+            "body" => body
+          },
+          "data" => %{
+            "id" => "#{id}",
+            "path" => "orders",
+            "created_at" => Date.utc_today(),
+            "click_action" => "FLUTTER_NOTIFICATION_CLICK"
+          }
         }
       }
-    }
 
-    # todo, check the error, then delete the access token
+      # todo, check the error, then delete the access token
+      test_message = %{
+        "message" => %{
+          "token" =>
+            "dROnDZkGQPm4357TH__VXI:APA91bEpRxZL7bY-piD5jhfqZ-Ce0BIfDlB1EMyioNnv_29mcC9XdoVXKhM9GBI132m2HzUMCiuliDdMcHcW7FBBwcYHw3CFbVNKLt63469zhsq5tFBtM7o",
+          "notification" => %{
+            "title" => "Salam Dari DJTECH",
+            "body" => "Anda boleh periksa keadaan mesin dari sini2"
+          },
+          "data" => %{
+            "id" => "0",
+            "path" => "orders",
+            "created_at" => Date.utc_today(),
+            "click_action" => "FLUTTER_NOTIFICATION_CLICK"
+          }
+        }
+      }
 
-    res =
-      HTTPoison.post(
-        "https://fcm.googleapis.com/v1/projects/djtech-655dd/messages:send",
-        message |> Jason.encode!(),
-        [
-          {"content-type", "application/json"},
-          {"Authorization", "Bearer #{access_token}"}
-        ]
-      )
+      res =
+        HTTPoison.post(
+          "https://fcm.googleapis.com/v1/projects/djtech-655dd/messages:send",
+          message |> Jason.encode!(),
+          [
+            {"content-type", "application/json"},
+            {"Authorization", "Bearer #{access_token}"}
+          ]
+        )
 
-    case res do
-      {:ok, %HTTPoison.Response{body: body}} ->
-        keys = Jason.decode!(body) |> Map.keys()
+      case res do
+        {:ok, %HTTPoison.Response{body: body}} ->
+          keys = Jason.decode!(body) |> Map.keys()
 
-        if "error" in keys do
-          Repo.delete_all(
-            from(md in BlogEngine.Settings.MessagingDevice, where: md.uuid == ^device_token)
-          )
-        end
+          if "error" in keys do
+            if device_token != nil do
+              Repo.delete_all(
+                from(md in BlogEngine.Settings.MessagingDevice, where: md.uuid == ^device_token)
+              )
+            else
+              IO.inspect("no device token, #{body}")
+            end
+          end
 
-      _ ->
-        nil
+        _ ->
+          nil
+      end
+    else
+      IO.inspect("no device token, #{body}")
     end
   end
 
@@ -1515,20 +1550,25 @@ defmodule BlogEngine.Settings do
     # Dynamically create FILTER clauses for each day of the current month
     day_filters =
       Enum.map(1..31, fn day ->
+        padded_day = String.pad_leading(Integer.to_string(day), 2, "0")
+
         """
-        sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{String.pad_leading(Integer.to_string(day), 2, "0")}') AS day_#{day}
+        sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{padded_day}') AS day_#{day},
+        sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{padded_day}' AND l.sales_type = 'offline') AS day_#{day}_online_sum,
+        sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{padded_day}' AND l.sales_type = 'cash') AS day_#{day}_offline_sum
         """
       end)
       |> Enum.join(",\n")
 
     query3 = """
-
     select
         to_char(l.inserted_at, 'YYYY-MM') as year,
         d.short_name as device,
         d.name as device_long,
         count(l.id) as transactions,
         sum(l.amount) as amount,
+        count(l.id) FILTER (WHERE l.sales_type = 'offline') as sales_online,
+        count(l.id) FILTER (WHERE l.sales_type = 'cash') as sales_offline,
         o.name as outlet,
         COALESCE(oz.name, 'n/a') as organization,
         #{day_filters}
@@ -1723,8 +1763,18 @@ defmodule BlogEngine.Settings do
     Repo.get!(IoReading, id)
   end
 
+  @doc """
+  BlogEngine.Settings.create_io_reading(%{
+    device_id: 18,
+    log: %{"frequency" => 30,"is_consistent" => true,"pin" => 25,"pulse_count" => 3} |> Jason.encode!,
+    final_data: "3"
+  })
+  """
   def create_io_reading(params \\ %{}) do
-    IoReading.changeset(%IoReading{}, params) |> Repo.insert() |> IO.inspect()
+    res = IoReading.changeset(%IoReading{}, params) |> Repo.insert() |> IO.inspect()
+
+    Elixir.Task.start_link(__MODULE__, :convert_io_reading_task, [res])
+    res
   end
 
   def update_io_reading(model, params) do
@@ -1755,5 +1805,144 @@ defmodule BlogEngine.Settings do
 
   def delete_reading_conversion(%ReadingConversion{} = model) do
     Repo.delete(model)
+  end
+
+  def convert_io_reading_task(res) do
+    table = Repo.all(ReadingConversion) |> IO.inspect(label: "table")
+
+    case res do
+      {:ok, io_reading} ->
+        io_reading = io_reading |> Repo.preload(device: :outlet)
+
+        Multi.new()
+        |> Multi.run(:sales, fn _repo, %{} ->
+          amt = 0
+
+          # 4
+          reading =
+            case io_reading.final_data |> Integer.parse() do
+              {amt, _suffix} ->
+                amt
+
+              _ ->
+                0
+            end
+            |> IO.inspect(label: "reading")
+
+          res =
+            table
+            |> Enum.filter(&(&1.reading_start <= reading and &1.reading_end >= reading))
+            |> IO.inspect(label: "res")
+            |> List.first()
+
+          amt =
+            if res != nil do
+              Map.get(res, :converted_data)
+            else
+              0
+            end
+
+          create_sale(%{
+            uid: Ecto.UUID.generate(),
+            amount: amt,
+            outlet_id: io_reading.device.outlet.id,
+            organization_id: io_reading.device.organization_id,
+            device_id: io_reading.device.id,
+            payment_channel: "cash",
+            sales_date: Date.utc_today(),
+            payment_ref: "io_reading:#{io_reading.id}",
+            sales_type: "cash",
+            status: "complete"
+          })
+        end)
+        |> Multi.run(:io, fn _repo, %{} ->
+          update_io_reading(io_reading, %{is_processed: true})
+        end)
+        |> Repo.transaction()
+
+      _ ->
+        nil
+    end
+  end
+
+  def convert_unprocessed_io_reading() do
+    table = Repo.all(ReadingConversion) |> IO.inspect(label: "table")
+
+    io_readings =
+      Repo.all(from(ir in IoReading, where: ir.is_processed != true, preload: [device: :outlet]))
+
+    for io_reading <- io_readings do
+      Multi.new()
+      |> Multi.run(:sales, fn _repo, %{} ->
+        amt = 0
+
+        # 4
+        reading =
+          case io_reading.final_data |> Integer.parse() do
+            {amt, _suffix} ->
+              amt
+
+            _ ->
+              0
+          end
+          |> IO.inspect(label: "reading")
+
+        res =
+          table
+          |> Enum.filter(&(&1.reading_start <= reading and &1.reading_end >= reading))
+          |> IO.inspect(label: "res")
+          |> List.first()
+
+        amt =
+          if res != nil do
+            Map.get(res, :converted_data)
+          else
+            0
+          end
+
+        create_sale(%{
+          uid: Ecto.UUID.generate(),
+          amount: amt,
+          outlet_id: io_reading.device.outlet.id,
+          organization_id: io_reading.device.organization_id,
+          device_id: io_reading.device.id,
+          payment_channel: "cash",
+          sales_date: Date.utc_today(),
+          payment_ref: "io_reading:#{io_reading.id}",
+          sales_type: "cash",
+          status: "complete"
+        })
+      end)
+      |> Multi.run(:io, fn _repo, %{} ->
+        update_io_reading(io_reading, %{is_processed: true})
+      end)
+      |> Repo.transaction()
+    end
+  end
+
+  def get_organization_summary(organization_id) do
+    case Integer.parse(organization_id) do
+      :error ->
+        %Organization{
+          id: 0,
+          name: "DJTECH",
+          address: "Malaysia",
+          phone: "0",
+          contact_person: "DJTECH",
+          desc: "IOT",
+          img_url: "",
+          reg_no: "0",
+          bank_name: "",
+          bank_acc_no: "",
+          bank_holder_name: "",
+          inserted_at: NaiveDateTime.utc_now(),
+          updated_at: NaiveDateTime.utc_now(),
+          outlets: Repo.all(from(o in Outlet, preload: [:devices]))
+        }
+
+      _ ->
+        Repo.get_by(Organization, id: organization_id) |> Repo.preload(outlets: [:devices])
+    end
+    |> IO.inspect(label: "summar")
   end
 end
