@@ -7,13 +7,13 @@ use Mix.Config
 # watchers to your application. For example, we use it
 # with webpack to recompile .js and .css sources.
 config :blog_engine, BlogEngineWeb.Endpoint,
-  http: [port: 4000],
-  https: [
-    port: 4001,
-    cipher_suite: :strong,
-    keyfile: "priv/cert/selfsigned_key.pem",
-    certfile: "priv/cert/selfsigned.pem"
-  ],
+  http: [port: 4060],
+  # https: [
+  #   port: 4061,
+  #   cipher_suite: :strong,
+  #   keyfile: "priv/cert/selfsigned_key.pem",
+  #   certfile: "priv/cert/selfsigned.pem"
+  # ],
   debug_errors: true,
   code_reloader: true,
   check_origin: false,

@@ -32,6 +32,11 @@ defmodule BlogEngine.Application do
 
     {:ok, pid} = Agent.start_link(fn -> %{} end)
     Process.register(pid, :kv)
+    
+    # Add ESP32 task queue Agent
+    {:ok, esp32_pid} = Agent.start_link(fn -> %{} end)
+    Process.register(esp32_pid, :esp32_tasks)
+    
     path = File.cwd!() <> "/media"
 
     if File.exists?(path) == false do

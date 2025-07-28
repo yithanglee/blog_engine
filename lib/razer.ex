@@ -18,6 +18,7 @@ defmodule Razer do
           {"MYR", "DuitNowSQR"}
       end
 
+
     generate_signature = fn ->
       merchant_id = merchant_id
       verify_key = vkey
@@ -32,9 +33,9 @@ defmodule Razer do
     checksum = generate_signature.()
 
     url =
-      "https://api.merchant.razer.com/RMS/API/staticqr/index.php?merchantID=#{merchant_id}&channel=#{pg}&orderid=#{device_uid}&currency=#{currency}&amount=1&bill_name=#{outlet_name}&bill_desc=itemdesc&checksum=#{checksum}"
+      "https://api.fiuu.com/RMS/API/staticqr/index.php?merchantID=#{merchant_id}&channel=#{pg}&orderid=#{device_uid}&currency=#{currency}&amount=1&bill_name=#{outlet_name |> String.replace(" ", "%20")}&bill_desc=itemdesc&checksum=#{checksum}"
 
-    response = HTTPoison.get!(url)
+    response = HTTPoison.get!(url) |> IO.inspect()
 
     case response do
       %HTTPoison.Response{status_code: 200, body: body} ->

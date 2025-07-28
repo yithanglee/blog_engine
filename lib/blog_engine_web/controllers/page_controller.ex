@@ -102,7 +102,7 @@ defmodule BlogEngineWeb.PageController do
       if device.is_cloridge do
         CloridgeAPI.send_message(reps, device.cloridge_device_uid)
       else
-        BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
+        BlogEngineWeb.ApiController.send_device_command(device.name, %{
           "action" => "start",
           "format" => format,
           "reps" => reps,
@@ -344,7 +344,7 @@ defmodule BlogEngineWeb.PageController do
       if device.is_cloridge do
         CloridgeAPI.send_message(reps, device.cloridge_device_uid)
       else
-        BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
+        BlogEngineWeb.ApiController.send_device_command(device.name, %{
           "action" => "start",
           "format" => format,
           "reps" => reps,

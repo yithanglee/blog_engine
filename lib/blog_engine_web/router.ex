@@ -38,6 +38,7 @@ defmodule BlogEngineWeb.Router do
         "https://admin.djtech4u.com",
         "http://localhost:5173",
         "http://localhost:5174",
+        "http://localhost:2578",
         "http://localhost:3000"
       ]
 
@@ -62,6 +63,7 @@ defmodule BlogEngineWeb.Router do
         "https://admin.djtech4u.com",
         "http://localhost:5173",
         "http://localhost:5174",
+        "http://localhost:2578",
         "http://localhost:3000"
       ]
 
@@ -89,6 +91,17 @@ defmodule BlogEngineWeb.Router do
 
     get "/webhook", ApiController, :get
     post "/webhook", ApiController, :post
+    
+    # ESP32 HTTP polling endpoints (existing)
+    get "/poll/:device_id", ApiController, :esp32_poll
+    get "/stream/:device_id", ApiController, :esp32_stream
+    post "/complete/:device_id", ApiController, :esp32_complete
+    
+    # A7670C cellular device endpoints
+    post "/a7670c/join", ApiController, :a7670c_join
+    get "/a7670c/poll/:device_id", ApiController, :a7670c_poll
+    post "/a7670c/reading/:device_id", ApiController, :a7670c_reading
+    get "/a7670c/commands/:device_id", ApiController, :a7670c_commands
   end
 
   scope "/cloridge", BlogEngineWeb do

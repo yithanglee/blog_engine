@@ -535,7 +535,16 @@ defmodule BlogEngineWeb.ApiController do
         if device.is_cloridge do
           CloridgeAPI.send_message(reps, device.cloridge_device_uid)
         else
-          BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
+          # BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
+          #   "action" => "start",
+          #   "format" => format,
+          #   "reps" => reps,
+          #   "delay" => delay,
+          #   "uuid" => uuid,
+          #   "pin" => device.default_io_pin
+          # })
+
+          send_device_command(device.name, %{
             "action" => "start",
             "format" => format,
             "reps" => reps,
@@ -775,7 +784,7 @@ defmodule BlogEngineWeb.ApiController do
           if device.is_cloridge do
             CloridgeAPI.send_message(reps, device.cloridge_device_uid)
           else
-            BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
+            send_device_command(device.name, %{
               "action" => "start",
               "format" => format,
               "reps" => reps,
@@ -878,7 +887,15 @@ defmodule BlogEngineWeb.ApiController do
           if device.is_cloridge do
             CloridgeAPI.send_message(reps, device.cloridge_device_uid)
           else
-            BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
+            # BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
+            #   "action" => "start",
+            #   "format" => format,
+            #   "reps" => reps,
+            #   "delay" => delay,
+            #   "uuid" => uuid,
+            #   "pin" => device.default_io_pin
+            # })
+            send_device_command(device.name, %{
               "action" => "start",
               "format" => format,
               "reps" => reps,
@@ -1053,7 +1070,16 @@ defmodule BlogEngineWeb.ApiController do
           if device.is_cloridge do
             CloridgeAPI.send_message(reps, device.cloridge_device_uid)
           else
-            BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
+            # BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
+            #   "action" => "start",
+            #   "format" => format,
+            #   "reps" => reps,
+            #   "delay" => delay,
+            #   "uuid" => uuid,
+            #   "pin" => device.default_io_pin
+            # })
+
+            send_device_command(device.name, %{
               "action" => "start",
               "format" => format,
               "reps" => reps,
@@ -1156,7 +1182,7 @@ defmodule BlogEngineWeb.ApiController do
           if device.is_cloridge do
             CloridgeAPI.send_message(reps, device.cloridge_device_uid)
           else
-            BlogEngineWeb.Endpoint.broadcast("user:#{device.name}", "start_pwm", %{
+            send_device_command(device.name, %{
               "action" => "start",
               "format" => format,
               "reps" => reps,
@@ -1428,7 +1454,15 @@ defmodule BlogEngineWeb.ApiController do
           if device.is_cloridge do
             CloridgeAPI.send_message(reps, device.cloridge_device_uid)
           else
-            BlogEngineWeb.Endpoint.broadcast("user:#{params["name"]}", "start_pwm", %{
+            # BlogEngineWeb.Endpoint.broadcast("user:#{params["name"]}", "start_pwm", %{
+            #   "action" => params["action"],
+            #   "format" => format,
+            #   "reps" => reps,
+            #   "delay" => delay,
+            #   "uuid" => uuid,
+            #   "pin" => device.default_io_pin
+            # })
+            send_device_command(params["name"], %{
               "action" => params["action"],
               "format" => format,
               "reps" => reps,
@@ -2410,5 +2444,424 @@ defmodule BlogEngineWeb.ApiController do
           query_transaction(checkout_id, count + 1)
       end
     end
+  end
+
+  # ESP32 HTTP Polling Methods
+
+  @doc """
+  ESP32 Simple Polling - Returns JSON with pending tasks
+  GET /iot/poll/:device_id
+  """
+  def esp32_poll(conn, %{"device_id" => device_id}) do
+    tasks = get_esp32_tasks(device_id)
+
+    json(conn, %{
+      device_id: device_id,
+      tasks: tasks,
+      timestamp: System.system_time(:second)
+    })
+  end
+
+  @doc """
+  ESP32 SSE Streaming - Long polling with chunked response
+  GET /iot/stream/:device_id
+  """
+  def esp32_stream(conn, %{"device_id" => device_id}) do
+    conn =
+      conn
+      |> put_resp_content_type("text/event-stream")
+      |> put_resp_header("cache-control", "no-cache")
+      |> put_resp_header("connection", "keep-alive")
+      |> send_chunked(200)
+
+    # Send initial connection event
+    {:ok, conn} =
+      chunk(
+        conn,
+        "event: connected\ndata: #{Jason.encode!(%{device_id: device_id, status: "connected"})}\n\n"
+      )
+
+    # Stream tasks for up to 30 seconds
+    Enum.reduce_while(
+      # Poll 10 times (30 seconds total)
+      1..10,
+      conn,
+      fn iteration, conn ->
+        tasks = get_esp32_tasks(device_id)
+
+        if tasks != [] do
+          # Send tasks and halt
+          event_data =
+            Jason.encode!(%{
+              device_id: device_id,
+              tasks: tasks,
+              timestamp: System.system_time(:second)
+            })
+
+          case chunk(conn, "event: task\ndata: #{event_data}\n\n") do
+            {:ok, conn} ->
+              # Clear tasks after sending
+              clear_esp32_tasks(device_id)
+              {:halt, conn}
+
+            {:error, :closed} ->
+              {:halt, conn}
+          end
+        else
+          # Send heartbeat and continue
+          heartbeat =
+            Jason.encode!(%{
+              device_id: device_id,
+              heartbeat: true,
+              iteration: iteration,
+              timestamp: System.system_time(:second)
+            })
+
+          case chunk(conn, "event: heartbeat\ndata: #{heartbeat}\n\n") do
+            {:ok, conn} ->
+              # Wait 3 seconds
+              Process.sleep(3000)
+              {:cont, conn}
+
+            {:error, :closed} ->
+              {:halt, conn}
+          end
+        end
+      end
+    )
+  end
+
+  @doc """
+  ESP32 Task Completion - Mark tasks as completed
+
+
+  Endpoint: /iot/a7670c/complete/00000000-0000-0000-a0b7-65272c4
+  Data: {"uuid":"b4de1b92-b8fc-4d0b-81c8-8340f9b4d379","action":"start","pin":16,"reps":5,"status":"completed"}
+
+
+  POST /iot/complete/:device_id
+  """
+  def esp32_complete(conn, %{"device_id" => device_id} = params) do
+    # Log task completion
+    device = BlogEngine.Settings.get_device_by_name(device_id)
+
+    if device do
+      BlogEngine.Settings.create_device_log(%{
+        device_id: device.id,
+        uuid: params["uuid"] || Ecto.UUID.generate(),
+        remarks: "HTTP polling task completed: #{params["task_type"] || "unknown"}"
+      })
+    end
+
+    json(conn, %{
+      status: "completed",
+      device_id: device_id,
+      timestamp: System.system_time(:second)
+    })
+  end
+
+  # Helper functions for ESP32 task management
+
+  defp get_esp32_tasks(device_id) do
+    pid = Process.whereis(:esp32_tasks)
+
+    if pid do
+      Agent.get(pid, fn tasks -> Map.get(tasks, device_id, []) end)
+    else
+      []
+    end
+  end
+
+  defp add_esp32_task(device_id, task) do
+    pid = Process.whereis(:esp32_tasks)
+
+    if pid do
+      Agent.update(pid, fn tasks ->
+        current_tasks = Map.get(tasks, device_id, [])
+        Map.put(tasks, device_id, [task | current_tasks])
+      end)
+    end
+  end
+
+  defp clear_esp32_tasks(device_id) do
+    pid = Process.whereis(:esp32_tasks)
+
+    if pid do
+      Agent.update(pid, fn tasks -> Map.delete(tasks, device_id) end)
+    end
+  end
+
+  @doc """
+  Add task to ESP32 queue - called when payment is received
+  """
+  def queue_esp32_task(device_name, task_data) do
+    task = %{
+      uuid: task_data["uuid"],
+      action: task_data["action"],
+      format: task_data["format"],
+      reps: task_data["reps"],
+      delay: task_data["delay"],
+      pin: task_data["pin"],
+      timestamp: System.system_time(:second),
+      created_at: DateTime.utc_now() |> DateTime.to_iso8601()
+    }
+
+    add_esp32_task(device_name, task)
+
+    # Log the queued task
+    device = BlogEngine.Settings.get_device_by_name(device_name)
+
+    if device do
+      # BlogEngine.Settings.create_device_log(%{
+      #   device_id: device.id,
+      #   uuid: task.uuid,
+      #   job_content: Jason.encode!(task),
+      #   remarks: "HTTP polling task queued: #{task.action} with #{task.reps} reps"
+      # })
+    end
+
+    task
+  end
+
+  @doc """
+  Unified communication method - handles both WebSocket and HTTP polling
+  """
+  def send_device_command(device_name, command_data) do
+    device = BlogEngine.Settings.get_device_by_name(device_name)
+
+    if device do
+      # Always queue for HTTP polling (supports both ESP32 WiFi and A7670C cellular)
+      queue_esp32_task(device_name, command_data)
+
+      # Also try WebSocket for WiFi connections (will fail gracefully for cellular)
+      try do
+        BlogEngineWeb.Endpoint.broadcast("user:#{device_name}", "start_pwm", command_data)
+      rescue
+        _ ->
+          # WebSocket failed, HTTP polling will handle it
+          Logger.info("WebSocket broadcast failed for #{device_name}, using HTTP polling")
+      end
+
+      # Log command for tracking
+      Logger.info("Command sent to device #{device_name}: #{inspect(command_data)}")
+    end
+  end
+
+  # A7670C Cellular Device HTTP Communication Methods
+
+  @doc """
+  A7670C Device Join - Initial device registration
+  POST /iot/a7670c/join
+
+
+
+
+  """
+  def a7670c_join(conn, %{"device_id" => device_id} = params) do
+    Logger.info("A7670C device joined: #{device_id}")
+
+    device = BlogEngine.Settings.get_device_by_name(device_id)
+
+    if device do
+      # Log device join
+      BlogEngine.Settings.create_device_time_log(%{device_id: device.id})
+      BlogEngineWeb.Endpoint.broadcast("user:#{device_id}", "i_am_online", %{})
+      
+      # Minimal response to fit A7670C 250-byte limit
+      # Use short field names and essential data only
+      response_data = %{
+        s: "ok", # status
+        id: device_id |> String.slice(-8..-1), # Last 8 chars only
+        c: %{ # config
+          p: device.default_io_pin || 16, # pin
+          f: device.format || "pwm", # format
+          b: 9600 # baud_rate
+        },
+        ts: System.system_time(:second) # timestamp
+      }
+
+      json(conn, response_data)
+    else
+      conn
+      |> put_status(404)
+      |> json(%{s: "error", r: "not found"}) # Minimal error response
+    end
+  end
+
+  @doc """
+  A7670C Polling - Returns pending commands and tasks
+  GET /iot/a7670c/poll/:device_id
+  """
+  def a7670c_poll(conn, %{"device_id" => device_id}) do
+    # Get pending tasks from the ESP32 task queue (reuse existing infrastructure)
+    tasks = get_esp32_tasks(device_id)
+
+    DeviceTracker.update_last_online(device_id)
+    BlogEngine.Settings.create_device_time_log(%{device_id: device_id})
+    BlogEngineWeb.Endpoint.broadcast("user:#{device_id}", "i_am_online", %{})
+    IO.inspect(tasks, label: "tasks")
+
+    # Get any pending commands specific to A7670C
+    commands = get_a7670c_commands(device_id)
+
+    # Minimal response to fit A7670C 250-byte limit
+    # Use short field names and minimal data
+    response_data = %{
+      id: device_id |> String.slice(-8..-1), # Last 8 chars only
+      t: tasks |> Enum.map(fn task ->
+        %{
+          u: task.uuid , # Short UUID
+          a: task.action,
+          r: task.reps,
+          d: task.delay,
+          p: task.pin
+        }
+      end) |> Enum.take(1), # Limit to 1 task to stay under 250 bytes
+      ts: System.system_time(:second)
+    }
+
+    # Clear tasks after sending (same as ESP32)
+    if tasks != [] do
+      clear_esp32_tasks(device_id)
+    end
+
+    json(conn, response_data)
+  end
+
+  @doc """
+  A7670C Reading Submission - PWM readings, cash readings, etc.
+  POST /iot/a7670c/reading/:device_id
+  """
+  def a7670c_reading(conn, %{"device_id" => device_id, "reading" => reading_data} = params) do
+    Logger.info("Reading from A7670C device #{device_id}: #{inspect(reading_data)}")
+
+    device = BlogEngine.Settings.get_device_by_name(device_id)
+
+    if device do
+      # Process the reading based on type
+      case reading_data["type"] do
+        "pwm" ->
+          process_pwm_reading(device, reading_data)
+
+        "cash" ->
+          process_cash_reading(device, reading_data)
+
+        "rs232" ->
+          process_rs232_reading(device, reading_data)
+
+        _ ->
+          Logger.warn("Unknown reading type: #{reading_data["type"]}")
+      end
+
+      # Log the reading
+      BlogEngine.Settings.create_device_log(%{
+        device_id: device.id,
+        uuid: reading_data["uuid"] || Ecto.UUID.generate(),
+        remarks: "A7670C reading received: #{reading_data["type"]} - #{inspect(reading_data)}"
+      })
+    end
+
+    json(conn, %{
+      status: "received",
+      device_id: device_id,
+      timestamp: System.system_time(:second)
+    })
+  end
+
+  @doc """
+  A7670C Commands - Get pending commands for device
+  GET /iot/a7670c/commands/:device_id
+  """
+  def a7670c_commands(conn, %{"device_id" => device_id}) do
+    commands = get_a7670c_commands(device_id)
+
+    json(conn, %{
+      device_id: device_id,
+      commands: commands,
+      timestamp: System.system_time(:second)
+    })
+  end
+
+  # Helper functions for A7670C support
+
+  defp get_a7670c_device_settings(device_id) do
+    device = BlogEngine.Settings.get_device_by_name(device_id)
+
+    is_bill_acceptor = fn ->
+      if device.is_rs232 do
+        "bill_acceptor"
+      else
+        "pwm_machine"
+      end
+    end
+
+    if device do
+      %{
+        pwm_config: %{
+          input_pin: device.default_io_pin || 14
+        },
+        rs232_config: %{
+          baud_rate: 9600,
+          rx_pin: device.reading_pin || 32,  # Changed from 25 to 32
+          tx_pin: device.default_io_pin || 33,  # Changed from 26 to 33
+          protocol: "8N2",
+          device_type: is_bill_acceptor.()
+        },
+        device_config: %{
+          format: device.format || "pwm",
+          default_pin: device.default_io_pin || 5,
+          skip_first: device.skip_first || false
+        }
+      }
+    else
+      %{}
+    end
+  end
+
+  defp get_a7670c_commands(device_id) do
+    # Check for any pending commands in the database or cache
+    # For now, return empty array - can be extended based on requirements
+    []
+  end
+
+  defp process_pwm_reading(device, reading_data) do
+    # Process PWM frequency readings
+    frequency = reading_data["frequency"]
+    pulse_count = reading_data["pulse_count"]
+
+    Logger.info(
+      "PWM Reading - Device: #{device.name}, Frequency: #{frequency}Hz, Pulses: #{pulse_count}"
+    )
+
+    # You can add logic here to:
+    # - Store readings in database
+    # - Trigger alerts based on frequency
+    # - Update device status
+  end
+
+  defp process_cash_reading(device, reading_data) do
+    # Process cash/bill acceptor readings
+    value = reading_data["value"]
+    bill_type = reading_data["device"]
+
+    Logger.info("Cash Reading - Device: #{device.name}, Value: $#{value}, Type: #{bill_type}")
+
+    # You can add logic here to:
+    # - Record cash transactions
+    # - Update device cash totals
+    # - Trigger dispensing logic
+  end
+
+  defp process_rs232_reading(device, reading_data) do
+    # Process RS232 device readings
+    device_type = reading_data["device"]
+    value = reading_data["value"]
+
+    Logger.info("RS232 Reading - Device: #{device.name}, Type: #{device_type}, Value: #{value}")
+
+    # You can add logic here to:
+    # - Handle different RS232 device types
+    # - Process device-specific data
+    # - Update device states
   end
 end
