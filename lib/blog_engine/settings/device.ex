@@ -14,6 +14,7 @@ defmodule BlogEngine.Settings.Device do
     field(:default_delay, :float, default: 0.1)
     field(:format, :string, default: "pwm")
     field(:record_wifi_time, :boolean, default: false)
+    field(:use_http_polling, :boolean, default: false)
     field(:short_desc, :string)
     belongs_to(:outlet, BlogEngine.Settings.Outlet)
     field(:default_io_pin, :integer, default: 0)
@@ -33,6 +34,7 @@ defmodule BlogEngine.Settings.Device do
   def changeset(device, attrs) do
     device
     |> cast(attrs, [
+      :use_http_polling,
       :is_rs232,
       :is_round_down,
       :keep_pending_task,

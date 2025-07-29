@@ -36,6 +36,10 @@ defmodule BlogEngine.Application do
     # Add ESP32 task queue Agent
     {:ok, esp32_pid} = Agent.start_link(fn -> %{} end)
     Process.register(esp32_pid, :esp32_tasks)
+
+    # Add device mapping cache Agent
+    {:ok, device_pid} = Agent.start_link(fn -> %{} end)
+    Process.register(device_pid, :device_cache)
     
     path = File.cwd!() <> "/media"
 

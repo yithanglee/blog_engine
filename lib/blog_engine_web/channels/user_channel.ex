@@ -95,11 +95,11 @@ defmodule BlogEngineWeb.UserChannel do
   @impl true
   def handle_in("ping", payload, socket) do
     if socket.assigns.device_id != nil do
-      # Elixir.Task.start_link(BlogEngine.Settings, :create_device_time_log, [
-      #   %{device_id: socket.assigns.device_id}
-      # ])
+      Elixir.Task.start_link(BlogEngine.Settings, :create_device_time_log, [
+        %{device_id: socket.assigns.device_id}
+      ])
 
-      BlogEngine.Settings.create_device_time_log(%{device_id: socket.assigns.device_id})
+      # BlogEngine.Settings.create_device_time_log(%{device_id: socket.assigns.device_id})
     else
       IO.inspect("the device id was not assigned here..")
     end

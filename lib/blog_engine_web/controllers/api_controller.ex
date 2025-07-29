@@ -418,6 +418,27 @@ defmodule BlogEngineWeb.ApiController do
             %{name: "Send 5 motor reps", value: 5, action: "motor"}
           ]
 
+        "device_cache_status" ->
+          pid = Process.whereis(:device_cache)
+          if pid do
+            cache_data = Agent.get(pid, fn cache -> cache end)
+            %{
+              status: "active",
+              cached_devices: Map.keys(cache_data),
+              cache_size: map_size(cache_data)
+            }
+          else
+            %{status: "not_found", message: "Device cache agent not running"}
+          end
+
+        "preload_device_cache" ->
+          count = preload_device_cache()
+          %{status: "ok", devices_cached: count}
+
+        "clear_device_cache" ->
+          clear_device_cache()
+          %{status: "ok", message: "Device cache cleared"}
+
         "translation" ->
           translation = BlogEngine.translation()
 
@@ -2543,11 +2564,11 @@ defmodule BlogEngineWeb.ApiController do
   """
   def esp32_complete(conn, %{"device_id" => device_id} = params) do
     # Log task completion
-    device = BlogEngine.Settings.get_device_by_name(device_id)
+    device_db_id = get_device_id_with_cache(device_id)
 
-    if device do
+    if device_db_id do
       BlogEngine.Settings.create_device_log(%{
-        device_id: device.id,
+        device_id: device_db_id,
         uuid: params["uuid"] || Ecto.UUID.generate(),
         remarks: "HTTP polling task completed: #{params["task_type"] || "unknown"}"
       })
@@ -2572,13 +2593,13 @@ defmodule BlogEngineWeb.ApiController do
     end
   end
 
-  defp add_esp32_task(device_id, task) do
+  defp add_esp32_task(device_name, task) do
     pid = Process.whereis(:esp32_tasks)
 
     if pid do
       Agent.update(pid, fn tasks ->
-        current_tasks = Map.get(tasks, device_id, [])
-        Map.put(tasks, device_id, [task | current_tasks])
+        current_tasks = Map.get(tasks, device_name, [])
+        Map.put(tasks, device_name, [task | current_tasks])
       end)
     end
   end
@@ -2589,6 +2610,75 @@ defmodule BlogEngineWeb.ApiController do
     if pid do
       Agent.update(pid, fn tasks -> Map.delete(tasks, device_id) end)
     end
+  end
+
+  # Device Cache Management Functions
+
+  defp get_device_id_from_cache(device_name) do
+    pid = Process.whereis(:device_cache)
+
+    if pid do
+      Agent.get(pid, fn cache -> Map.get(cache, device_name) end)
+    else
+      nil
+    end
+  end
+
+  defp cache_device_id(device_name, device_id) do
+    pid = Process.whereis(:device_cache)
+
+    if pid do
+      Agent.update(pid, fn cache -> Map.put(cache, device_name, device_id) end)
+    end
+  end
+
+  defp get_device_id_with_cache(device_name) do
+    # First try to get from cache
+    case get_device_id_from_cache(device_name) do
+      nil ->
+        # Cache miss - query database
+        device = BlogEngine.Settings.get_device_by_name(device_name)
+        if device do
+          # Cache the result for future use
+          cache_device_id(device_name, device.id)
+          device.id
+        else
+          nil
+        end
+      
+      device_id ->
+        # Cache hit
+        device_id
+    end
+  end
+
+  defp invalidate_device_cache(device_name) do
+    pid = Process.whereis(:device_cache)
+
+    if pid do
+      Agent.update(pid, fn cache -> Map.delete(cache, device_name) end)
+    end
+  end
+
+  defp clear_device_cache() do
+    pid = Process.whereis(:device_cache)
+
+    if pid do
+      Agent.update(pid, fn _cache -> %{} end)
+    end
+  end
+
+  @doc """
+  Bulk load devices into cache - useful for warming up the cache
+  """
+  def preload_device_cache() do
+    devices = BlogEngine.Settings.list_devices()
+    
+    Enum.each(devices, fn device ->
+      cache_device_id(device.name, device.id)
+    end)
+    
+    length(devices)
   end
 
   @doc """
@@ -2609,11 +2699,11 @@ defmodule BlogEngineWeb.ApiController do
     add_esp32_task(device_name, task)
 
     # Log the queued task
-    device = BlogEngine.Settings.get_device_by_name(device_name)
+    device_db_id = get_device_id_with_cache(device_name)
 
-    if device do
+    if device_db_id do
       # BlogEngine.Settings.create_device_log(%{
-      #   device_id: device.id,
+      #   device_id: device_db_id,
       #   uuid: task.uuid,
       #   job_content: Jason.encode!(task),
       #   remarks: "HTTP polling task queued: #{task.action} with #{task.reps} reps"
@@ -2627,9 +2717,9 @@ defmodule BlogEngineWeb.ApiController do
   Unified communication method - handles both WebSocket and HTTP polling
   """
   def send_device_command(device_name, command_data) do
-    device = BlogEngine.Settings.get_device_by_name(device_name)
+    device_db_id = get_device_id_with_cache(device_name)
 
-    if device do
+    if device_db_id do
       # Always queue for HTTP polling (supports both ESP32 WiFi and A7670C cellular)
       queue_esp32_task(device_name, command_data)
 
@@ -2660,11 +2750,15 @@ defmodule BlogEngineWeb.ApiController do
   def a7670c_join(conn, %{"device_id" => device_id} = params) do
     Logger.info("A7670C device joined: #{device_id}")
 
-    device = BlogEngine.Settings.get_device_by_name(device_id)
+    # Use cached device ID for database operations
+    device_db_id = get_device_id_with_cache(device_id)
 
-    if device do
-      # Log device join
-      BlogEngine.Settings.create_device_time_log(%{device_id: device.id})
+    if device_db_id do
+      # Get full device object only when we need configuration details
+      device = BlogEngine.Settings.get_device!(device_db_id)
+      
+      # Log device join using cached ID
+      BlogEngine.Settings.create_device_time_log(%{device_id: device_db_id})
       BlogEngineWeb.Endpoint.broadcast("user:#{device_id}", "i_am_online", %{})
       
       # Minimal response to fit A7670C 250-byte limit
@@ -2697,7 +2791,17 @@ defmodule BlogEngineWeb.ApiController do
     tasks = get_esp32_tasks(device_id)
 
     DeviceTracker.update_last_online(device_id)
-    BlogEngine.Settings.create_device_time_log(%{device_id: device_id})
+
+    # Use cached device ID instead of database query
+    device_db_id = get_device_id_with_cache(device_id)
+
+    # Elixir.Task.start_link(BlogEngine.Settings, :create_device_time_log, [%{device_id: device_id}])
+    
+    if device_db_id do
+      time_log = BlogEngine.Settings.create_device_time_log(%{device_id: device_db_id})
+      IO.inspect(time_log, label: "time_log")
+    end
+    
     BlogEngineWeb.Endpoint.broadcast("user:#{device_id}", "i_am_online", %{})
     IO.inspect(tasks, label: "tasks")
 
