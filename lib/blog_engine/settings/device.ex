@@ -8,6 +8,7 @@ defmodule BlogEngine.Settings.Device do
     field(:name, :string)
     field(:label, :string)
     field(:short_name, :string)
+    field(:current_firmware_version, :string)
     field(:qr_code_data, :binary)
     field(:is_cloridge, :boolean, default: false)
     field(:cloridge_device_uid, :string)
@@ -33,7 +34,7 @@ defmodule BlogEngine.Settings.Device do
   @doc false
   def changeset(device, attrs) do
     device
-    |> cast(attrs, [
+    |> cast(attrs, [:current_firmware_version,
       :use_http_polling,
       :is_rs232,
       :is_round_down,

@@ -284,7 +284,7 @@ defmodule BlogEngine do
   def eval_svt(
         singular,
         plural,
-        opts
+        opts \\ %{}
       ) do
     struct =
       singular |> String.split("_") |> Enum.map(&(&1 |> String.capitalize())) |> Enum.join("")

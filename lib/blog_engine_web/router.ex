@@ -102,6 +102,25 @@ defmodule BlogEngineWeb.Router do
     get "/a7670c/poll/:device_id", ApiController, :a7670c_poll
     post "/a7670c/reading/:device_id", ApiController, :a7670c_reading
     get "/a7670c/commands/:device_id", ApiController, :a7670c_commands
+    
+    # OTA update endpoints
+    post "/ota/trigger/:device_id", ApiController, :trigger_ota_update
+    get "/ota/status/:device_id", ApiController, :get_ota_status
+    post "/ota/batch", ApiController, :batch_ota_update
+    get "/ota/versions", ApiController, :list_firmware_versions
+  end
+
+  scope "/firmware", BlogEngineWeb do
+    pipe_through :plain_api
+    
+    # Check for firmware updates
+    get "/check/:device_id", PageController, :check_firmware_version
+    
+    # Download firmware binary
+    get "/:device_id/:version", PageController, :firmware_download
+    
+    # OTA status reporting from devices
+    post "/status/:device_id", ApiController, :ota_status_report
   end
 
   scope "/cloridge", BlogEngineWeb do
@@ -123,8 +142,10 @@ defmodule BlogEngineWeb.Router do
     options("/:model", ApiController, :datatable)
     get("/:model", ApiController, :datatable)
     post("/:model", ApiController, :form_submission)
-    options("/:model/:id", ApiController, :delete_data)
+
     delete("/:model/:id", ApiController, :delete_data)
+
+    options("/*path", PageController, :index)
   end
 
   scope "/api", BlogEngineWeb do

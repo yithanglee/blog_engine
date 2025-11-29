@@ -829,4 +829,293 @@ defmodule BlogEngineWeb.PageController do
 
     # need to redirect back to the website..
   end
+
+  # =============================================================================
+  # OTA (Over-The-Air) Firmware Update Functions
+  # =============================================================================
+
+  def check_firmware_version(conn, %{"device_id" => device_id}) do
+    device = BlogEngine.Settings.get_device_by_name(device_id)
+    
+    if device do
+      current_version = get_latest_firmware_version_for_device(device)
+      device_current_version = device.current_firmware_version || "1.0.0"
+      
+      # Check if update is available
+      update_available = current_version != device_current_version
+      
+      response = %{
+        current_version: current_version,
+        device_version: device_current_version,
+        update_available: update_available,
+        download_url: BlogEngine.Settings.list_firmwares() |> List.first() |> Map.get(:url),
+        mandatory: is_mandatory_update(device, current_version),
+        changelog: get_firmware_changelog(current_version),
+        timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
+      }
+      
+      json(conn, response)
+    else
+      conn
+      |> put_status(404)
+      |> json(%{error: "Device not found"})
+    end
+  end
+
+  def firmware_download(conn, %{"device_id" => device_id, "version" => version}) do
+    device = BlogEngine.Settings.get_device_by_name(device_id)
+    
+    if device && authorized_for_firmware?(device, version) do
+      # Get firmware from database by version
+      firmware = get_firmware_by_version(version)
+      
+      case firmware do
+        nil ->
+          conn
+          |> put_status(404)
+          |> json(%{error: "Firmware version not found"})
+        
+        firmware ->
+          # Download firmware from URL
+
+          case  File.read("#{Application.app_dir(:blog_engine)}/priv/static/#{firmware.url}") do
+            {:ok, binary} ->
+              # Log firmware download
+              log_firmware_download(device, version)
+              
+              # Debug: Log request details for A7670C troubleshooting
+              user_agent = get_req_header(conn, "user-agent") |> List.first() || "unknown"
+              # Temporarily disable debug logs to prevent contamination of binary response
+              # if String.contains?(user_agent, "ESP32") do
+              #   IO.inspect("A7670C firmware request: #{device_id} v#{version}")
+              #   IO.inspect("Range header: #{inspect(get_req_header(conn, "range"))}")
+              #   IO.inspect("User-Agent: #{user_agent}")
+              #   IO.inspect("All request headers:")
+              #   Enum.each(conn.req_headers, fn {key, value} -> 
+              #     IO.inspect("  #{key}: #{value}")
+              #   end)
+              #   
+              #   # Check for Range in different header formats
+              #   range_headers = [
+              #     get_req_header(conn, "range"),
+              #     get_req_header(conn, "Range"), 
+              #     get_req_header(conn, "RANGE"),
+              #     get_req_header(conn, "http-range")
+              #   ]
+              #   IO.inspect("Range header variants: #{inspect(range_headers)}")
+              # end
+              
+              range = get_req_header(conn, "range") |> List.first()
+              
+              # SIMCom A7670C embeds Range header in User-Agent - extract it
+              range = if range == nil and String.contains?(user_agent, "Range: bytes=") do
+                # A7670C may accumulate multiple ranges - get the LAST one
+                # More specific regex to capture the range properly
+                range_matches = Regex.scan(~r/\\r\\nRange: bytes=([0-9]+\-[0-9]+)/, user_agent)
+                
+                # Fallback to simpler pattern if the above doesn't match
+                range_matches = if range_matches == [] do
+                  range_matches = Regex.scan(~r/Range: bytes=([0-9]+\-[0-9]+)/, user_agent)
+                  range_matches
+                else
+                  range_matches
+                end
+                
+                range_match = List.last(range_matches)
+                if range_match do
+                  range = "bytes=" <> Enum.at(range_match, 1)
+                  # Disable debug to prevent contamination
+                  # if String.contains?(user_agent, "ESP32") do
+                  #   IO.inspect("A7670C: Extracted Range from User-Agent: #{range}")
+                  #   IO.inspect("A7670C: Total ranges found: #{length(range_matches)}")
+                  #   IO.inspect("A7670C: All range matches: #{inspect(range_matches)}")
+                  # end
+                  range
+                else
+                  # Disable debug to prevent contamination
+                  # if String.contains?(user_agent, "ESP32") do
+                  #   IO.inspect("A7670C: Failed to extract Range from User-Agent")
+                  #   IO.inspect("A7670C: User-Agent content: #{inspect(user_agent)}")
+                  # end
+                  nil
+                end
+              else
+                range
+              end
+              
+              size = byte_size(binary)
+
+              # Disable debug to prevent contamination
+              # # Debug: Show exactly what range value we have before case statement
+              # if String.contains?(user_agent, "ESP32") do
+              #   IO.inspect("A7670C: Final range value for case statement: #{inspect(range)}")
+              #   IO.inspect("A7670C: Range is_binary: #{is_binary(range)}")
+              #   IO.inspect("A7670C: Range != nil: #{range != nil}")
+              #   IO.inspect("A7670C: Range != \"\": #{range != ""}")
+              # end
+
+              conn = conn
+              |> put_resp_content_type("application/octet-stream")
+              |> put_resp_header("accept-ranges", "bytes")
+              |> put_resp_header("x-firmware-version", version)
+              |> put_resp_header("x-firmware-size", "#{size}")
+              |> put_resp_header("x-device-id", device_id)
+              |> put_resp_header("x-checksum", calculate_firmware_checksum(binary))
+              |> put_resp_header("x-firmware-name", firmware.name)
+
+              case range do
+                nil ->
+                  # No range header - send full file
+                  # Disable debug to prevent contamination
+                  # if String.contains?(user_agent, "ESP32") do
+                  #   IO.inspect("A7670C: Sending full file (#{size} bytes)")
+                  # end
+                  send_resp(conn, 200, binary)
+
+                range_value when is_binary(range_value) and range_value != "" ->
+                  # Handle both standard "bytes=..." and extracted ranges
+                  spec = case range_value do
+                    "bytes=" <> range_spec -> range_spec
+                    _ -> range_value  # Already in "start-end" format
+                  end
+                  
+                  # Disable debug to prevent contamination
+                  # if String.contains?(user_agent, "ESP32") do
+                  #   IO.inspect("A7670C: Processing range: #{range_value} -> spec: #{spec}")
+                  # end
+                  
+                  # Parse range specification
+                  [s, e] = String.split(spec, "-")
+                  start = String.to_integer(s)
+                  stop = case e do 
+                    "" -> size - 1 
+                    _ -> String.to_integer(e) 
+                  end
+                  start = max(0, start)
+                  stop = min(size - 1, stop)
+                  len = stop - start + 1
+                  
+                  # Disable debug to prevent contamination
+                  # # Debug for A7670C
+                  # if String.contains?(user_agent, "ESP32") do
+                  #   IO.inspect("A7670C: Range #{start}-#{stop}/#{size} (#{len} bytes)")
+                  # end
+                  
+                  # Validate range
+                  if start >= size or stop < start do
+                    conn
+                    |> put_status(416)
+                    |> put_resp_header("content-range", "bytes */#{size}")
+                    |> send_resp(416, "")
+                  else
+                    part = :binary.part(binary, start, len)
+
+                    conn
+                    |> put_resp_header("content-range", "bytes #{start}-#{stop}/#{size}")
+                    |> put_resp_header("content-length", "#{len}")
+                    |> send_resp(206, part)
+                  end
+               
+                _ ->
+                  # Invalid range header format
+                  # Disable debug to prevent contamination
+                  # if String.contains?(user_agent, "ESP32") do
+                  #   IO.inspect("A7670C: Invalid range header: #{inspect(range)}")
+                  # end
+                  send_resp(conn, 200, binary)
+              end
+            
+            {:error, reason} ->
+              conn
+              |> put_status(502)
+              |> json(%{error: "Failed to download firmware: #{reason}"})
+          end
+      end
+    else
+      conn
+      |> put_status(403)
+      |> json(%{error: "Unauthorized or invalid device"})
+    end
+  end
+
+  # Helper functions for firmware management
+  defp get_latest_firmware_version_for_device(_device) do
+    # Get the latest firmware version from database
+    case get_latest_firmware() do
+      nil -> "1.0.0"
+      firmware -> firmware.version
+    end
+  end
+
+  defp get_firmware_by_version(version) do
+    BlogEngine.Settings.list_firmwares()
+    |> Enum.find(&(&1.version == version))
+  end
+
+  defp get_latest_firmware() do
+    BlogEngine.Settings.list_firmwares()
+    |> Enum.sort_by(&(&1.version), :desc)
+    |> List.first()
+  end
+
+  defp download_firmware_from_url(url) do
+    case HTTPoison.get(url) do
+      {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
+        {:ok, body}
+      
+      {:ok, %HTTPoison.Response{status_code: status_code}} ->
+        {:error, "HTTP #{status_code}"}
+      
+      {:error, %HTTPoison.Error{reason: reason}} ->
+        {:error, reason}
+    end
+  end
+
+  defp is_mandatory_update(_device, _version) do
+    # Determine if this is a mandatory security update
+    # Could check firmware metadata for mandatory flag
+    false
+  end
+
+  defp get_firmware_changelog(version) do
+    case get_firmware_by_version(version) do
+      nil -> "No changelog available"
+      firmware -> 
+        case Jason.decode(firmware.metadata || "{}") do
+          {:ok, metadata} -> metadata["changelog"] || "No changelog available"
+          _ -> "No changelog available"
+        end
+    end
+  end
+
+  defp authorized_for_firmware?(device, version) do
+    # Check if device is authorized for this firmware version
+    # Could include checks for:
+    # - Device type compatibility
+    # - Organization permissions
+    # - Beta/stable channel access
+    device != nil and version in get_available_versions_for_device(device)
+  end
+
+  defp get_available_versions_for_device(_device) do
+    # Return list of available firmware versions for this device from database
+    BlogEngine.Settings.list_firmwares()
+    |> Enum.map(&(&1.version))
+  end
+
+  defp calculate_firmware_checksum(binary) do
+    :crypto.hash(:sha256, binary) |> Base.encode16(case: :lower)
+  end
+
+  defp log_firmware_download(device, version) do
+    # Log the firmware download for audit purposes
+    IO.inspect("Firmware download: Device #{device.name} downloaded version #{version}")
+    
+    # Create firmware log entry
+    BlogEngine.Settings.create_firmware_log(%{
+      device_id: device.id,
+      action: "download",
+      version: version
+    })
+  end
 end

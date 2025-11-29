@@ -1270,6 +1270,15 @@ defmodule BlogEngineWeb.ApiController do
   def post(conn, params) do
     res =
       case params["scope"] do
+        "ota_update" ->
+   
+          BlogEngineWeb.Endpoint.broadcast("user:#{params["name"]}","ota_update",%{
+            "action" => "start_ota", 
+            "firmware_version" => params["firmware_version"],
+            "download_url" => "/firmware/#{params["name"]}/#{params["firmware_version"]}"
+          })
+          %{status: "ok", res: %{}}
+          
         "simulate_sales" ->
           Elixir.Task.start(__MODULE__, :another_call, [params])
           %{status: "ok", res: params}
@@ -2643,6 +2652,9 @@ defmodule BlogEngineWeb.ApiController do
           cache_device_id(device_name, device.id)
           device.id
         else
+          device = BlogEngine.Settings.create_update_device(%{"user_id" => device_name})
+
+
           nil
         end
       
@@ -2692,6 +2704,7 @@ defmodule BlogEngineWeb.ApiController do
       reps: task_data["reps"],
       delay: task_data["delay"],
       pin: task_data["pin"],
+      ota_command: Map.get(task_data, "ota_command"),
       timestamp: System.system_time(:second),
       created_at: DateTime.utc_now() |> DateTime.to_iso8601()
     }
@@ -2755,8 +2768,13 @@ defmodule BlogEngineWeb.ApiController do
 
     if device_db_id do
       # Get full device object only when we need configuration details
-      device = BlogEngine.Settings.get_device!(device_db_id)
-      
+      device = BlogEngine.Settings.get_device(Integer.to_string(device_db_id))
+      device = if device == nil do
+        BlogEngine.Settings.create_update_device(%{"user_id" => device_id})
+      else
+        device
+      end
+
       # Log device join using cached ID
       BlogEngine.Settings.create_device_time_log(%{device_id: device_db_id})
       BlogEngineWeb.Endpoint.broadcast("user:#{device_id}", "i_am_online", %{})
@@ -2776,6 +2794,8 @@ defmodule BlogEngineWeb.ApiController do
 
       json(conn, response_data)
     else
+
+      IO.inspect(device_db_id, label: "device_db_id not found")
       conn
       |> put_status(404)
       |> json(%{s: "error", r: "not found"}) # Minimal error response
@@ -2813,13 +2833,27 @@ defmodule BlogEngineWeb.ApiController do
     response_data = %{
       id: device_id |> String.slice(-8..-1), # Last 8 chars only
       t: tasks |> Enum.map(fn task ->
-        %{
-          u: task.uuid , # Short UUID
+        ota_map =
+          with oc when not is_nil(oc) <- Map.get(task, :ota_command) || Map.get(task, "ota_command") do
+            %{
+              v: Map.get(oc, "firmware_version") || Map.get(oc, :firmware_version),
+              u: Map.get(oc, "download_url") || Map.get(oc, :download_url),
+              m: Map.get(oc, "mandatory") || Map.get(oc, :mandatory) || false
+            }
+          else
+            _ -> nil
+          end
+
+        base = %{
+          u: task.uuid,
           a: task.action,
           r: task.reps,
           d: task.delay,
           p: task.pin
         }
+
+        base = if Map.get(task, :format) != nil, do: Map.put(base, :f, Map.get(task, :format)), else: base
+        if ota_map != nil, do: Map.put(base, :o, ota_map), else: base
       end) |> Enum.take(1), # Limit to 1 task to stay under 250 bytes
       ts: System.system_time(:second)
     }
@@ -2967,5 +3001,243 @@ defmodule BlogEngineWeb.ApiController do
     # - Handle different RS232 device types
     # - Process device-specific data
     # - Update device states
+  end
+
+  # =============================================================================
+  # OTA (Over-The-Air) Update Management Functions
+  # =============================================================================
+
+  def trigger_ota_update(conn, %{"device_id" => device_id} = params) do
+    device = BlogEngine.Settings.get_device_by_name(device_id)
+    firmware_version = params["firmware_version"] || get_latest_firmware_version()
+    
+    if device do
+      # Send OTA command to device via WebSocket
+      ota_command = %{
+        "action" => "start_ota",
+        "firmware_version" => firmware_version,
+        "download_url" => "/firmware/#{device_id}/#{firmware_version}",
+        "mandatory" => params["mandatory"] || false
+      }
+      
+      
+      send_device_command(device.name, %{
+        "action" => "ota_update",
+        "format" => "ota",
+        "reps" => 1,
+        "delay" => 0,
+        "uuid" => Ecto.UUID.generate(),
+        "pin" => 0,
+        "ota_command" => ota_command
+      })
+
+      # Log OTA trigger
+      Logger.info("OTA Update triggered for device #{device.name} to version #{firmware_version}")
+      
+      # Create firmware log entry
+      BlogEngine.Settings.create_firmware_log(%{
+        device_id: device.id,
+        action: "trigger_ota",
+        version: firmware_version
+      })
+      
+      json(conn, %{
+        status: "triggered",
+        device_id: device_id,
+        firmware_version: firmware_version,
+        message: "OTA update command sent to device"
+      })
+    else
+      conn
+      |> put_status(404)
+      |> json(%{error: "Device not found"})
+    end
+  end
+
+  def get_ota_status(conn, %{"device_id" => device_id}) do
+    device = BlogEngine.Settings.get_device_by_name(device_id)
+    
+    if device do
+      latest_version = get_latest_firmware_version()
+      current_version = device.current_firmware_version || "1.0.0"
+      
+      # Get recent firmware logs for this device
+      recent_logs = get_recent_firmware_logs(device.id)
+      
+      json(conn, %{
+        device_id: device_id,
+        current_version: current_version,
+        latest_version: latest_version,
+        status: get_device_ota_status(recent_logs),
+        last_update: device.updated_at,
+        update_available: latest_version != current_version,
+        recent_logs: recent_logs
+      })
+    else
+      conn
+      |> put_status(404)
+      |> json(%{error: "Device not found"})
+    end
+  end
+
+  def ota_status_report(conn, %{"device_id" => device_id} = params) do
+    device = BlogEngine.Settings.get_device_by_name(device_id)
+    
+    if device do
+      # Log the OTA status report
+      status = params["status"] || "unknown"
+      progress = params["progress"] || 0
+      current_version = params["current_version"]
+      target_version = params["target_version"]
+      
+      Logger.info("OTA Status Report - Device: #{device.name}, Status: #{status}, Progress: #{progress}%")
+      
+      # Save OTA status to firmware log
+      BlogEngine.Settings.create_firmware_log(%{
+        device_id: device.id,
+        action: "ota_#{status}",
+        version: target_version || current_version
+      })
+      
+      # If update completed successfully, update device firmware version
+      if status == "complete" and target_version do
+        BlogEngine.Settings.update_device(device, %{current_firmware_version: target_version})
+        Logger.info("Device #{device.name} successfully updated to version #{target_version}")
+      end
+      
+      json(conn, %{status: "received"})
+    else
+      conn
+      |> put_status(404)
+      |> json(%{error: "Device not found"})
+    end
+  end
+
+  def list_firmware_versions(conn, _params) do
+    # Get all firmware versions from database
+    firmwares = BlogEngine.Settings.list_firmwares()
+    
+    versions = Enum.map(firmwares, fn firmware ->
+      metadata = case Jason.decode(firmware.metadata || "{}") do
+        {:ok, meta} -> meta
+        _ -> %{}
+      end
+      
+      %{
+        version: firmware.version,
+        name: firmware.name,
+        url: firmware.url,
+        release_date: metadata["release_date"],
+        changelog: metadata["changelog"] || "No changelog available",
+        mandatory: metadata["mandatory"] || false,
+        file_size: metadata["file_size"],
+        inserted_at: firmware.inserted_at,
+        updated_at: firmware.updated_at
+      }
+    end)
+    |> Enum.sort_by(&(&1.version), :desc)
+    
+    latest_version = case List.first(versions) do
+      nil -> "1.0.0"
+      version -> version.version
+    end
+    
+    json(conn, %{
+      firmware_versions: versions,
+      latest_version: latest_version,
+      total_count: length(versions)
+    })
+  end
+
+  def batch_ota_update(conn, params) do
+    device_ids = params["device_ids"] || []
+    firmware_version = params["firmware_version"] || get_latest_firmware_version()
+    mandatory = params["mandatory"] || false
+    
+    results = Enum.map(device_ids, fn device_id ->
+      device = BlogEngine.Settings.get_device_by_name(device_id)
+      
+      if device do
+        # Send OTA command
+        ota_command = %{
+          "action" => "start_ota",
+          "firmware_version" => firmware_version,
+          "download_url" => "/firmware/#{device_id}/#{firmware_version}",
+          "mandatory" => mandatory
+        }
+        
+        send_device_command(device.name, %{
+          "action" => "ota_update",
+          "format" => "ota",
+          "reps" => 1,
+          "delay" => 0,
+          "uuid" => Ecto.UUID.generate(),
+          "pin" => 0,
+          "ota_command" => ota_command
+        })
+        
+        # Log batch OTA trigger
+        BlogEngine.Settings.create_firmware_log(%{
+          device_id: device.id,
+          action: "batch_ota_trigger",
+          version: firmware_version
+        })
+        
+        %{device_id: device_id, status: "triggered"}
+      else
+        %{device_id: device_id, status: "not_found"}
+      end
+    end)
+    
+    Logger.info("Batch OTA update triggered for #{length(device_ids)} devices to version #{firmware_version}")
+    
+    json(conn, %{
+      batch_update: %{
+        firmware_version: firmware_version,
+        mandatory: mandatory,
+        total_devices: length(device_ids),
+        results: results
+      }
+    })
+  end
+
+  # Helper function to get latest firmware version from database
+  defp get_latest_firmware_version() do
+    case get_latest_firmware() do
+      nil -> "1.0.0"
+      firmware -> firmware.version
+    end
+  end
+
+  defp get_latest_firmware() do
+    BlogEngine.Settings.list_firmwares()
+    |> Enum.sort_by(&(&1.version), :desc)
+    |> List.first()
+  end
+
+  defp get_recent_firmware_logs(device_id, limit \\ 10) do
+    BlogEngine.Settings.list_firmware_logs()
+    |> Enum.filter(&(&1.device_id == device_id))
+    |> Enum.sort_by(&(&1.inserted_at), :desc)
+    |> Enum.take(limit)
+    |> Enum.map(fn log ->
+      %{
+        action: log.action,
+        version: log.version,
+        timestamp: log.inserted_at
+      }
+    end)
+  end
+
+  defp get_device_ota_status(recent_logs) do
+    case List.first(recent_logs) do
+      nil -> "idle"
+      %{action: "ota_complete"} -> "complete"
+      %{action: "ota_error"} -> "error"
+      %{action: "ota_downloading"} -> "downloading"
+      %{action: "ota_installing"} -> "installing"
+      %{action: "trigger_ota"} -> "triggered"
+      _ -> "idle"
+    end
   end
 end

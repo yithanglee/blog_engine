@@ -11,21 +11,19 @@ defmodule BlogEngineWeb.UserChannel do
         if payload |> Map.get("user_id") do
           d = BlogEngine.Settings.get_device_by_name(payload |> Map.get("user_id"))
 
-          if d.record_wifi_time do
-            d
-          else
-            %{id: nil}
-          end
+          d
         else
-          %{id: nil}
+          %{id: nil, current_firmware_version: nil, record_wifi_time: false}
         end
+        |> IO.inspect(label: "device on join")
 
       socket =
         socket
         |> assign(:device_name, payload |> Map.get("name", "unknown"))
         |> assign(:uuid, payload |> Map.get("user_id", "unknown"))
         |> assign(:device_id, device.id)
-
+        |> assign(:current_firmware_version, device.current_firmware_version)
+        |> assign(:record_wifi_time, device.record_wifi_time)
       delay_start_outstanding_works(room_id)
       {:ok, socket}
     else
@@ -56,6 +54,10 @@ defmodule BlogEngineWeb.UserChannel do
 
     {:noreply, socket}
   end
+
+  @doc """
+  Get settings from the device
+  """
 
   @impl true
   def handle_in("get_settings", payload, socket) do
@@ -98,11 +100,36 @@ defmodule BlogEngineWeb.UserChannel do
       Elixir.Task.start_link(BlogEngine.Settings, :create_device_time_log, [
         %{device_id: socket.assigns.device_id}
       ])
-
-      # BlogEngine.Settings.create_device_time_log(%{device_id: socket.assigns.device_id})
     else
       IO.inspect("the device id was not assigned here..")
     end
+    # if socket.assigns.device_id != nil do
+    #     if socket.assigns.record_wifi_time do
+    #     Elixir.Task.start_link(BlogEngine.Settings, :create_device_time_log, [
+    #         %{device_id: socket.assigns.device_id}
+    #       ])
+    #     end
+    # else
+    #   IO.inspect("the device id was not assigned here..")
+    # end
+    socket =
+      if Map.get(payload, "firmware_version") != socket.assigns.current_firmware_version do
+        IO.inspect("firmware version mismatch")
+        device = BlogEngine.Settings.get_device_by_name(socket.assigns.uuid) |> IO.inspect(label: "device")
+
+        case BlogEngine.Settings.update_device(device, %{
+               current_firmware_version: Map.get(payload, "firmware_version")
+             }) do
+          {:ok, _} ->
+            socket
+            |> assign(:current_firmware_version, Map.get(payload, "firmware_version"))
+
+          {:error, _} ->
+            socket
+        end
+      else
+        socket
+      end
 
     broadcast(socket, "i_am_online", payload)
     {:reply, {:ok, payload}, socket}
@@ -114,6 +141,50 @@ defmodule BlogEngineWeb.UserChannel do
     IO.inspect(payload)
 
     broadcast(socket, "initiate", payload)
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_in("ota_status", payload, socket) do
+    IO.inspect("📡 OTA Status Update from ESP32:")
+    IO.inspect(payload)
+
+    device = BlogEngine.Settings.get_device_by_name(socket.assigns.uuid)
+
+    if device do
+      # Log the OTA status update
+      BlogEngine.Settings.create_firmware_log(%{
+        device_id: device.id,
+        action: "status_update_#{payload["status"]}",
+        version: payload["target_version"] || payload["current_version"] || "unknown"
+      })
+
+      # Update device current firmware version if OTA completed successfully
+      if payload["status"] == "complete" && payload["target_version"] do
+        BlogEngine.Settings.update_device(device, %{
+          current_firmware_version: payload["target_version"]
+        })
+
+        IO.inspect("✅ Device firmware version updated to: #{payload["target_version"]}")
+      end
+
+      # Broadcast status to any listeners (like web dashboard)
+      broadcast(socket, "ota_status_update", payload)
+    else
+      IO.inspect("⚠️ Device not found for OTA status update")
+    end
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_in("ota_update", payload, socket) do
+    IO.inspect("📡 Received OTA Update Command:")
+    IO.inspect(payload)
+
+    # This handles OTA commands sent from the API to the ESP32
+    # The ESP32 should receive this and start the OTA process
+    broadcast(socket, "ota_update", payload)
     {:noreply, socket}
   end
 

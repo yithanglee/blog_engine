@@ -246,6 +246,16 @@ defmodule BlogEngine.Settings do
     Repo.get_by(Device, name: id) |> Repo.preload(:outlet)
   end
 
+  def get_device(id) do
+    case Repo.get(Device, id) do
+      {:ok, device} ->
+        device |> Repo.preload([:outlet, :organization])
+
+      _ ->
+        nil
+    end
+  end
+
   def get_device!(id) do
     Repo.get!(Device, id) |> Repo.preload([:outlet, :organization])
   end
@@ -279,10 +289,39 @@ defmodule BlogEngine.Settings do
   end
 
   def update_device(model, params) do
-    Device.changeset(model, params) |> Repo.update() |> IO.inspect()
+    dcg = Device.changeset(model, params) |> Repo.update() |> IO.inspect()
+
+
+
+    case dcg do
+      {:ok, d} ->
+        is_bill_acceptor = fn ->
+          if d.is_rs232 do
+            "bill_acceptor"
+          else
+            "pwm_machine"
+          end
+        end
+        BlogEngineWeb.Endpoint.broadcast("user:#{d.name}", "settings_response", %{
+          "rs232_config" => %{"device_type" => is_bill_acceptor.()},
+          "pwm_config" => %{"input_pin" => d.reading_pin}
+        })
+
+      _ ->
+        nil
+    end
+
+    dcg
   end
 
   def delete_device(%Device{} = model) do
+    Repo.delete_all(from(s in BlogEngine.Settings.IoReading, where: s.device_id == ^model.id))
+    pid = Process.whereis(:device_cache)
+
+    if pid do
+      Agent.update(pid, fn cache -> Map.delete(cache, model.name) end)
+    end
+
     Repo.delete(model)
   end
 
@@ -1751,6 +1790,50 @@ defmodule BlogEngine.Settings do
         Enum.zip(columns |> Enum.map(&(&1 |> String.to_atom())), row) |> Enum.into(%{})
       end
     end
+  end
+
+  alias BlogEngine.Settings.Firmware
+
+  def list_firmwares() do
+    Repo.all(Firmware)
+  end
+
+  def get_firmware!(id) do
+    Repo.get!(Firmware, id)
+  end
+
+  def create_firmware(params \\ %{}) do
+    Firmware.changeset(%Firmware{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_firmware(model, params) do
+    Firmware.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_firmware(%Firmware{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.FirmwareLog
+
+  def list_firmware_logs() do
+    Repo.all(FirmwareLog)
+  end
+
+  def get_firmware_log!(id) do
+    Repo.get!(FirmwareLog, id)
+  end
+
+  def create_firmware_log(params \\ %{}) do
+    FirmwareLog.changeset(%FirmwareLog{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_firmware_log(model, params) do
+    FirmwareLog.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_firmware_log(%FirmwareLog{} = model) do
+    Repo.delete(model)
   end
 
   alias BlogEngine.Settings.IoReading
