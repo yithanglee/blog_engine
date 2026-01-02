@@ -1347,18 +1347,23 @@ defmodule BlogEngine.Settings do
     WITH hours_series AS (
       SELECT generate_series($2::timestamp, ($3::timestamp - interval '1 hour'), interval '1 hour') AS hour
     ),
+    agg AS (
+      SELECT
+        date_trunc('hour', inserted_at) AS hour,
+        COUNT(*) AS call_count
+      FROM device_time_logs
+      WHERE device_id = $1
+        AND inserted_at >= $2
+        AND inserted_at < $3
+      GROUP BY 1
+    ),
     counts AS (
       SELECT
         h.hour,
-        COUNT(d.id) AS call_count
+        COALESCE(a.call_count, 0) AS call_count
       FROM
         hours_series h
-        LEFT JOIN device_time_logs d
-          ON date_trunc('hour', d.inserted_at) = h.hour
-          AND d.device_id = $1
-          AND d.inserted_at BETWEEN $2 AND $3
-      GROUP BY
-        h.hour
+        LEFT JOIN agg a ON a.hour = h.hour
     )
     SELECT
       hour,
