@@ -38,7 +38,7 @@ defmodule BlogEngineWeb.ApiController do
   end
 
   @doc """
-  send data like 
+  send data like
   http://localhost:8512/ngrok/webhook?receiver=mines_massage_2&url=http://localhost:8501/api/webhook?scope=blogs&params=
   """
   def ngrok_get(conn, params) do
@@ -164,6 +164,32 @@ defmodule BlogEngineWeb.ApiController do
 
     res =
       case params["scope"] do
+        "model_get_by" ->
+          map =
+            params
+            |> Enum.map(fn {k, v} -> {String.to_atom(k), v} end)
+            |> Map.new()
+
+          BlogEngine.Utility.get_by(
+            params["model"],
+            map
+            |> Map.drop([
+              :model,
+              :scope
+            ])
+          )
+          |> BluePotion.sanitize_struct()
+
+        "datatable" ->
+          BlogEngine.Utility.build_datatable_query(
+            BlogEngine.Utility.modulize_name(params["model"]),
+            params,
+            params
+            |> Map.drop([
+              :model,
+              :scope
+            ])
+          )
         "get_create_device" ->
           Settings.create_update_device(params)
           |> BluePotion.sanitize_struct()
@@ -402,6 +428,12 @@ defmodule BlogEngineWeb.ApiController do
 
         "get_wifi_logs" ->
           Settings.get_call_counts_with_empty_minutes(params["id"] |> String.to_integer())
+
+        "datatable_device_wifi_logs" ->
+          Settings.device_wifi_logs_grouped_datatable(params)
+
+        "datatable_device_wifi_logs_weekly_month" ->
+          Settings.device_wifi_logs_weekly_in_month_datatable(params)
 
         "get_device" ->
           Settings.get_device!(params["id"])
@@ -654,7 +686,7 @@ defmodule BlogEngineWeb.ApiController do
   end
 
   @doc """
-     
+
     BlogEngineWeb.ApiController.ipay88_payment(%Plug.Conn{}, p)
   """
 
@@ -1271,14 +1303,14 @@ defmodule BlogEngineWeb.ApiController do
     res =
       case params["scope"] do
         "ota_update" ->
-   
+
           BlogEngineWeb.Endpoint.broadcast("user:#{params["name"]}","ota_update",%{
-            "action" => "start_ota", 
+            "action" => "start_ota",
             "firmware_version" => params["firmware_version"],
             "download_url" => "/firmware/#{params["name"]}/#{params["firmware_version"]}"
           })
           %{status: "ok", res: %{}}
-          
+
         "simulate_sales" ->
           Elixir.Task.start(__MODULE__, :another_call, [params])
           %{status: "ok", res: params}
@@ -1938,22 +1970,22 @@ defmodule BlogEngineWeb.ApiController do
               {int, _suffix} = Integer.parse(val)
 
               """
-                a.#{Atom.to_string(key)}==#{int} 
+                a.#{Atom.to_string(key)}==#{int}
               """
 
             val == "null" ->
               """
-                is_nil(a.#{Atom.to_string(key)}) 
+                is_nil(a.#{Atom.to_string(key)})
               """
 
             Atom.to_string(key) |> String.contains?("_id") ->
               """
-                a.#{Atom.to_string(key)}==#{val} 
+                a.#{Atom.to_string(key)}==#{val}
               """
 
             val == "true" || val == "false" ->
               """
-                a.#{Atom.to_string(key)}==#{val} 
+                a.#{Atom.to_string(key)}==#{val}
               """
 
             true ->
@@ -2079,7 +2111,7 @@ defmodule BlogEngineWeb.ApiController do
               [i, val] = item |> String.split("!=")
 
               """
-              |> where([a,b,c,d], a.#{i} != #{val}) 
+              |> where([a,b,c,d], a.#{i} != #{val})
               """
 
             item |> String.contains?("_id^") ->
@@ -2091,12 +2123,12 @@ defmodule BlogEngineWeb.ApiController do
                 case Integer.parse(ss) do
                   {ss, _} ->
                     """
-                    |> where([a,b,c,d], a.#{i} == ^"#{ss}") 
+                    |> where([a,b,c,d], a.#{i} == ^"#{ss}")
                     """
 
                   _ ->
                     """
-                    |> where([a,b,c,d], a.#{i} == ^"#{ss}") 
+                    |> where([a,b,c,d], a.#{i} == ^"#{ss}")
                     """
                 end
               end
@@ -2108,7 +2140,7 @@ defmodule BlogEngineWeb.ApiController do
 
               if ss != "" do
                 """
-                |> where([a,b,c,d],  ilike(#{prefix}.#{i}, ^"%#{ss}%") ) 
+                |> where([a,b,c,d],  ilike(#{prefix}.#{i}, ^"%#{ss}%") )
                 """
               end
 
@@ -2657,7 +2689,7 @@ defmodule BlogEngineWeb.ApiController do
 
           nil
         end
-      
+
       device_id ->
         # Cache hit
         device_id
@@ -2685,11 +2717,11 @@ defmodule BlogEngineWeb.ApiController do
   """
   def preload_device_cache() do
     devices = BlogEngine.Settings.list_devices()
-    
+
     Enum.each(devices, fn device ->
       cache_device_id(device.name, device.id)
     end)
-    
+
     length(devices)
   end
 
@@ -2778,7 +2810,7 @@ defmodule BlogEngineWeb.ApiController do
       # Log device join using cached ID
       BlogEngine.Settings.create_device_time_log(%{device_id: device_db_id})
       BlogEngineWeb.Endpoint.broadcast("user:#{device_id}", "i_am_online", %{})
-      
+
       # Minimal response to fit A7670C 250-byte limit
       # Use short field names and essential data only
       response_data = %{
@@ -2816,12 +2848,12 @@ defmodule BlogEngineWeb.ApiController do
     device_db_id = get_device_id_with_cache(device_id)
 
     # Elixir.Task.start_link(BlogEngine.Settings, :create_device_time_log, [%{device_id: device_id}])
-    
+
     if device_db_id do
       time_log = BlogEngine.Settings.create_device_time_log(%{device_id: device_db_id})
       IO.inspect(time_log, label: "time_log")
     end
-    
+
     BlogEngineWeb.Endpoint.broadcast("user:#{device_id}", "i_am_online", %{})
     IO.inspect(tasks, label: "tasks")
 
@@ -3010,7 +3042,7 @@ defmodule BlogEngineWeb.ApiController do
   def trigger_ota_update(conn, %{"device_id" => device_id} = params) do
     device = BlogEngine.Settings.get_device_by_name(device_id)
     firmware_version = params["firmware_version"] || get_latest_firmware_version()
-    
+
     if device do
       # Send OTA command to device via WebSocket
       ota_command = %{
@@ -3019,8 +3051,8 @@ defmodule BlogEngineWeb.ApiController do
         "download_url" => "/firmware/#{device_id}/#{firmware_version}",
         "mandatory" => params["mandatory"] || false
       }
-      
-      
+
+
       send_device_command(device.name, %{
         "action" => "ota_update",
         "format" => "ota",
@@ -3033,14 +3065,14 @@ defmodule BlogEngineWeb.ApiController do
 
       # Log OTA trigger
       Logger.info("OTA Update triggered for device #{device.name} to version #{firmware_version}")
-      
+
       # Create firmware log entry
       BlogEngine.Settings.create_firmware_log(%{
         device_id: device.id,
         action: "trigger_ota",
         version: firmware_version
       })
-      
+
       json(conn, %{
         status: "triggered",
         device_id: device_id,
@@ -3056,14 +3088,14 @@ defmodule BlogEngineWeb.ApiController do
 
   def get_ota_status(conn, %{"device_id" => device_id}) do
     device = BlogEngine.Settings.get_device_by_name(device_id)
-    
+
     if device do
       latest_version = get_latest_firmware_version()
       current_version = device.current_firmware_version || "1.0.0"
-      
+
       # Get recent firmware logs for this device
       recent_logs = get_recent_firmware_logs(device.id)
-      
+
       json(conn, %{
         device_id: device_id,
         current_version: current_version,
@@ -3082,29 +3114,29 @@ defmodule BlogEngineWeb.ApiController do
 
   def ota_status_report(conn, %{"device_id" => device_id} = params) do
     device = BlogEngine.Settings.get_device_by_name(device_id)
-    
+
     if device do
       # Log the OTA status report
       status = params["status"] || "unknown"
       progress = params["progress"] || 0
       current_version = params["current_version"]
       target_version = params["target_version"]
-      
+
       Logger.info("OTA Status Report - Device: #{device.name}, Status: #{status}, Progress: #{progress}%")
-      
+
       # Save OTA status to firmware log
       BlogEngine.Settings.create_firmware_log(%{
         device_id: device.id,
         action: "ota_#{status}",
         version: target_version || current_version
       })
-      
+
       # If update completed successfully, update device firmware version
       if status == "complete" and target_version do
         BlogEngine.Settings.update_device(device, %{current_firmware_version: target_version})
         Logger.info("Device #{device.name} successfully updated to version #{target_version}")
       end
-      
+
       json(conn, %{status: "received"})
     else
       conn
@@ -3116,13 +3148,13 @@ defmodule BlogEngineWeb.ApiController do
   def list_firmware_versions(conn, _params) do
     # Get all firmware versions from database
     firmwares = BlogEngine.Settings.list_firmwares()
-    
+
     versions = Enum.map(firmwares, fn firmware ->
       metadata = case Jason.decode(firmware.metadata || "{}") do
         {:ok, meta} -> meta
         _ -> %{}
       end
-      
+
       %{
         version: firmware.version,
         name: firmware.name,
@@ -3136,12 +3168,12 @@ defmodule BlogEngineWeb.ApiController do
       }
     end)
     |> Enum.sort_by(&(&1.version), :desc)
-    
+
     latest_version = case List.first(versions) do
       nil -> "1.0.0"
       version -> version.version
     end
-    
+
     json(conn, %{
       firmware_versions: versions,
       latest_version: latest_version,
@@ -3153,10 +3185,10 @@ defmodule BlogEngineWeb.ApiController do
     device_ids = params["device_ids"] || []
     firmware_version = params["firmware_version"] || get_latest_firmware_version()
     mandatory = params["mandatory"] || false
-    
+
     results = Enum.map(device_ids, fn device_id ->
       device = BlogEngine.Settings.get_device_by_name(device_id)
-      
+
       if device do
         # Send OTA command
         ota_command = %{
@@ -3165,7 +3197,7 @@ defmodule BlogEngineWeb.ApiController do
           "download_url" => "/firmware/#{device_id}/#{firmware_version}",
           "mandatory" => mandatory
         }
-        
+
         send_device_command(device.name, %{
           "action" => "ota_update",
           "format" => "ota",
@@ -3175,22 +3207,22 @@ defmodule BlogEngineWeb.ApiController do
           "pin" => 0,
           "ota_command" => ota_command
         })
-        
+
         # Log batch OTA trigger
         BlogEngine.Settings.create_firmware_log(%{
           device_id: device.id,
           action: "batch_ota_trigger",
           version: firmware_version
         })
-        
+
         %{device_id: device_id, status: "triggered"}
       else
         %{device_id: device_id, status: "not_found"}
       end
     end)
-    
+
     Logger.info("Batch OTA update triggered for #{length(device_ids)} devices to version #{firmware_version}")
-    
+
     json(conn, %{
       batch_update: %{
         firmware_version: firmware_version,

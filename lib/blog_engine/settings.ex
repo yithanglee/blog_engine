@@ -1288,6 +1288,234 @@ defmodule BlogEngine.Settings do
     |> Map.get(:rows)
   end
 
+  @doc """
+  Grouped WiFi "online" logs for a device, returned in a DataTables-style shape.
+
+  This uses `device_time_logs` (each row = "online ping") and groups into 1-minute buckets.
+
+  Expected params:
+  - "id" (device id)
+  - "length" (page size)
+  - "start" (offset)
+  - "draw" (datatable draw id)
+  """
+  def device_wifi_logs_grouped_datatable(params) do
+    parse_int = fn value, default ->
+      case value do
+        nil -> default
+        v when is_integer(v) -> v
+        v when is_binary(v) ->
+          case Integer.parse(v) do
+            {i, _} -> i
+            _ -> default
+          end
+
+        _ ->
+          default
+      end
+    end
+
+    device_id =
+      params
+      |> Map.get("id")
+      |> parse_int.(0)
+
+    limit = parse_int.(Map.get(params, "length"), 20)
+    offset = parse_int.(Map.get(params, "start"), 0)
+    draw = parse_int.(Map.get(params, "draw"), 1)
+
+    date =
+      case Map.get(params, "date") do
+        nil ->
+          Date.utc_today()
+
+        date_str when is_binary(date_str) ->
+          case Date.from_iso8601(date_str) do
+            {:ok, d} -> d
+            _ -> Date.utc_today()
+          end
+
+        _ ->
+          Date.utc_today()
+      end
+
+    {y, m, d} = date |> Date.to_erl()
+    {:ok, start_datetime} = NaiveDateTime.from_erl({{y, m, d}, {0, 0, 0}})
+    end_datetime = start_datetime |> Timex.shift(days: 1)
+
+    query = """
+    WITH hours_series AS (
+      SELECT generate_series($2::timestamp, ($3::timestamp - interval '1 hour'), interval '1 hour') AS hour
+    ),
+    counts AS (
+      SELECT
+        h.hour,
+        COUNT(d.id) AS call_count
+      FROM
+        hours_series h
+        LEFT JOIN device_time_logs d
+          ON date_trunc('hour', d.inserted_at) = h.hour
+          AND d.device_id = $1
+          AND d.inserted_at BETWEEN $2 AND $3
+      GROUP BY
+        h.hour
+    )
+    SELECT
+      hour,
+      call_count,
+      COUNT(*) OVER() AS total_count
+    FROM
+      counts
+    ORDER BY
+      hour DESC
+    LIMIT $4 OFFSET $5;
+    """
+
+    res = Repo.query!(query, [device_id, start_datetime, end_datetime, limit, offset])
+
+    {data, total} =
+      case res.rows do
+        [] ->
+          {[], 0}
+
+        rows ->
+          total = rows |> List.first() |> Enum.at(2) || 0
+
+          data =
+            rows
+            |> Enum.map(fn [hour, call_count, _total_count] ->
+              %{
+                hour: hour |> NaiveDateTime.to_iso8601(),
+                call_count: call_count
+              }
+            end)
+
+          {data, total}
+      end
+
+    %{
+      data: data,
+      recordsTotal: total,
+      recordsFiltered: total,
+      draw: draw
+    }
+  end
+
+  @doc """
+  Weekly grouped WiFi logs (device_time_logs) within a selected month.
+
+  Params:
+  - "id": device id
+  - "month": "YYYY-MM" (defaults to current month)
+  - "length", "start", "draw": DataTables pagination params
+
+  Returns DataTables-style map: %{data, recordsTotal, recordsFiltered, draw}
+  where each row is %{week_start, week_end, call_count}.
+  """
+  def device_wifi_logs_weekly_in_month_datatable(params) do
+    parse_int = fn value, default ->
+      case value do
+        nil -> default
+        v when is_integer(v) -> v
+        v when is_binary(v) ->
+          case Integer.parse(v) do
+            {i, _} -> i
+            _ -> default
+          end
+
+        _ ->
+          default
+      end
+    end
+
+    device_id =
+      params
+      |> Map.get("id")
+      |> parse_int.(0)
+
+    limit = parse_int.(Map.get(params, "length"), 10)
+    offset = parse_int.(Map.get(params, "start"), 0)
+    draw = parse_int.(Map.get(params, "draw"), 1)
+
+    month_str =
+      case Map.get(params, "month") do
+        m when is_binary(m) and byte_size(m) >= 7 -> String.slice(m, 0, 7)
+        _ -> Date.utc_today() |> Date.to_iso8601() |> String.slice(0, 7)
+      end
+
+    month_start =
+      case Date.from_iso8601(month_str <> "-01") do
+        {:ok, d} -> d
+        _ -> Date.utc_today() |> Date.beginning_of_month()
+      end
+
+    month_end = month_start |> Date.add(Date.days_in_month(month_start)) # first day of next month
+
+    {:ok, start_datetime} = NaiveDateTime.from_erl({month_start |> Date.to_erl(), {0, 0, 0}})
+    {:ok, end_datetime} = NaiveDateTime.from_erl({month_end |> Date.to_erl(), {0, 0, 0}})
+
+    query = """
+    WITH weeks AS (
+      SELECT
+        gs AS week_start,
+        LEAST(gs + interval '7 day', $3::timestamp) AS week_end
+      FROM generate_series($2::timestamp, ($3::timestamp - interval '1 day'), interval '7 day') AS gs
+    ),
+    counts AS (
+      SELECT
+        w.week_start,
+        w.week_end,
+        COUNT(d.id) AS call_count
+      FROM
+        weeks w
+        LEFT JOIN device_time_logs d
+          ON d.device_id = $1
+          AND d.inserted_at >= w.week_start
+          AND d.inserted_at < w.week_end
+      GROUP BY
+        w.week_start, w.week_end
+    )
+    SELECT
+      week_start,
+      week_end,
+      call_count,
+      COUNT(*) OVER() AS total_count
+    FROM counts
+    ORDER BY week_start DESC
+    LIMIT $4 OFFSET $5;
+    """
+
+    res = Repo.query!(query, [device_id, start_datetime, end_datetime, limit, offset])
+
+    {data, total} =
+      case res.rows do
+        [] ->
+          {[], 0}
+
+        rows ->
+          total = rows |> List.first() |> Enum.at(3) || 0
+
+          data =
+            rows
+            |> Enum.map(fn [week_start, week_end, call_count, _total_count] ->
+              %{
+                week_start: week_start |> NaiveDateTime.to_iso8601(),
+                week_end: week_end |> NaiveDateTime.to_iso8601(),
+                call_count: call_count
+              }
+            end)
+
+          {data, total}
+      end
+
+    %{
+      data: data,
+      recordsTotal: total,
+      recordsFiltered: total,
+      draw: draw
+    }
+  end
+
   def delete_all_pending_sales() do
     res = Repo.all(from(s in Sale, where: s.status == ^:pending_payment, preload: [:sales_items]))
 
