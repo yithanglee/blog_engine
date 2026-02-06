@@ -190,6 +190,7 @@ defmodule BlogEngineWeb.ApiController do
               :scope
             ])
           )
+
         "get_create_device" ->
           Settings.create_update_device(params)
           |> BluePotion.sanitize_struct()
@@ -452,8 +453,10 @@ defmodule BlogEngineWeb.ApiController do
 
         "device_cache_status" ->
           pid = Process.whereis(:device_cache)
+
           if pid do
             cache_data = Agent.get(pid, fn cache -> cache end)
+
             %{
               status: "active",
               cached_devices: Map.keys(cache_data),
@@ -1303,12 +1306,12 @@ defmodule BlogEngineWeb.ApiController do
     res =
       case params["scope"] do
         "ota_update" ->
-
-          BlogEngineWeb.Endpoint.broadcast("user:#{params["name"]}","ota_update",%{
+          BlogEngineWeb.Endpoint.broadcast("user:#{params["name"]}", "ota_update", %{
             "action" => "start_ota",
             "firmware_version" => params["firmware_version"],
             "download_url" => "/firmware/#{params["name"]}/#{params["firmware_version"]}"
           })
+
           %{status: "ok", res: %{}}
 
         "simulate_sales" ->
@@ -1881,6 +1884,7 @@ defmodule BlogEngineWeb.ApiController do
       end
 
     p = booleans |> Enum.reduce(p, &BlogEngine.Settings.append_bool_key(&2, &1))
+    # some of the booleans didnt appear
     {result, _values} = Code.eval_string(dynamic_code, params: p |> BlogEngine.upload_file())
 
     IO.inspect(result)
@@ -2679,13 +2683,13 @@ defmodule BlogEngineWeb.ApiController do
       nil ->
         # Cache miss - query database
         device = BlogEngine.Settings.get_device_by_name(device_name)
+
         if device do
           # Cache the result for future use
           cache_device_id(device_name, device.id)
           device.id
         else
           device = BlogEngine.Settings.create_update_device(%{"user_id" => device_name})
-
 
           nil
         end
@@ -2801,11 +2805,13 @@ defmodule BlogEngineWeb.ApiController do
     if device_db_id do
       # Get full device object only when we need configuration details
       device = BlogEngine.Settings.get_device(Integer.to_string(device_db_id))
-      device = if device == nil do
-        BlogEngine.Settings.create_update_device(%{"user_id" => device_id})
-      else
-        device
-      end
+
+      device =
+        if device == nil do
+          BlogEngine.Settings.create_update_device(%{"user_id" => device_id})
+        else
+          device
+        end
 
       # Log device join using cached ID
       BlogEngine.Settings.create_device_time_log(%{device_id: device_db_id})
@@ -2814,23 +2820,31 @@ defmodule BlogEngineWeb.ApiController do
       # Minimal response to fit A7670C 250-byte limit
       # Use short field names and essential data only
       response_data = %{
-        s: "ok", # status
-        id: device_id |> String.slice(-8..-1), # Last 8 chars only
-        c: %{ # config
-          p: device.default_io_pin || 16, # pin
-          f: device.format || "pwm", # format
-          b: 9600 # baud_rate
+        # status
+        s: "ok",
+        # Last 8 chars only
+        id: device_id |> String.slice(-8..-1),
+        # config
+        c: %{
+          # pin
+          p: device.default_io_pin || 16,
+          # format
+          f: device.format || "pwm",
+          # baud_rate
+          b: 9600
         },
-        ts: System.system_time(:second) # timestamp
+        # timestamp
+        ts: System.system_time(:second)
       }
 
       json(conn, response_data)
     else
-
       IO.inspect(device_db_id, label: "device_db_id not found")
+
       conn
       |> put_status(404)
-      |> json(%{s: "error", r: "not found"}) # Minimal error response
+      # Minimal error response
+      |> json(%{s: "error", r: "not found"})
     end
   end
 
@@ -2863,30 +2877,40 @@ defmodule BlogEngineWeb.ApiController do
     # Minimal response to fit A7670C 250-byte limit
     # Use short field names and minimal data
     response_data = %{
-      id: device_id |> String.slice(-8..-1), # Last 8 chars only
-      t: tasks |> Enum.map(fn task ->
-        ota_map =
-          with oc when not is_nil(oc) <- Map.get(task, :ota_command) || Map.get(task, "ota_command") do
-            %{
-              v: Map.get(oc, "firmware_version") || Map.get(oc, :firmware_version),
-              u: Map.get(oc, "download_url") || Map.get(oc, :download_url),
-              m: Map.get(oc, "mandatory") || Map.get(oc, :mandatory) || false
-            }
-          else
-            _ -> nil
-          end
+      # Last 8 chars only
+      id: device_id |> String.slice(-8..-1),
+      t:
+        tasks
+        |> Enum.map(fn task ->
+          ota_map =
+            with oc when not is_nil(oc) <-
+                   Map.get(task, :ota_command) || Map.get(task, "ota_command") do
+              %{
+                v: Map.get(oc, "firmware_version") || Map.get(oc, :firmware_version),
+                u: Map.get(oc, "download_url") || Map.get(oc, :download_url),
+                m: Map.get(oc, "mandatory") || Map.get(oc, :mandatory) || false
+              }
+            else
+              _ -> nil
+            end
 
-        base = %{
-          u: task.uuid,
-          a: task.action,
-          r: task.reps,
-          d: task.delay,
-          p: task.pin
-        }
+          base = %{
+            u: task.uuid,
+            a: task.action,
+            r: task.reps,
+            d: task.delay,
+            p: task.pin
+          }
 
-        base = if Map.get(task, :format) != nil, do: Map.put(base, :f, Map.get(task, :format)), else: base
-        if ota_map != nil, do: Map.put(base, :o, ota_map), else: base
-      end) |> Enum.take(1), # Limit to 1 task to stay under 250 bytes
+          base =
+            if Map.get(task, :format) != nil,
+              do: Map.put(base, :f, Map.get(task, :format)),
+              else: base
+
+          if ota_map != nil, do: Map.put(base, :o, ota_map), else: base
+        end)
+        # Limit to 1 task to stay under 250 bytes
+        |> Enum.take(1),
       ts: System.system_time(:second)
     }
 
@@ -2972,8 +2996,10 @@ defmodule BlogEngineWeb.ApiController do
         },
         rs232_config: %{
           baud_rate: 9600,
-          rx_pin: device.reading_pin || 32,  # Changed from 25 to 32
-          tx_pin: device.default_io_pin || 33,  # Changed from 26 to 33
+          # Changed from 25 to 32
+          rx_pin: device.reading_pin || 32,
+          # Changed from 26 to 33
+          tx_pin: device.default_io_pin || 33,
           protocol: "8N2",
           device_type: is_bill_acceptor.()
         },
@@ -3052,7 +3078,6 @@ defmodule BlogEngineWeb.ApiController do
         "mandatory" => params["mandatory"] || false
       }
 
-
       send_device_command(device.name, %{
         "action" => "ota_update",
         "format" => "ota",
@@ -3122,7 +3147,9 @@ defmodule BlogEngineWeb.ApiController do
       current_version = params["current_version"]
       target_version = params["target_version"]
 
-      Logger.info("OTA Status Report - Device: #{device.name}, Status: #{status}, Progress: #{progress}%")
+      Logger.info(
+        "OTA Status Report - Device: #{device.name}, Status: #{status}, Progress: #{progress}%"
+      )
 
       # Save OTA status to firmware log
       BlogEngine.Settings.create_firmware_log(%{
@@ -3149,30 +3176,33 @@ defmodule BlogEngineWeb.ApiController do
     # Get all firmware versions from database
     firmwares = BlogEngine.Settings.list_firmwares()
 
-    versions = Enum.map(firmwares, fn firmware ->
-      metadata = case Jason.decode(firmware.metadata || "{}") do
-        {:ok, meta} -> meta
-        _ -> %{}
+    versions =
+      Enum.map(firmwares, fn firmware ->
+        metadata =
+          case Jason.decode(firmware.metadata || "{}") do
+            {:ok, meta} -> meta
+            _ -> %{}
+          end
+
+        %{
+          version: firmware.version,
+          name: firmware.name,
+          url: firmware.url,
+          release_date: metadata["release_date"],
+          changelog: metadata["changelog"] || "No changelog available",
+          mandatory: metadata["mandatory"] || false,
+          file_size: metadata["file_size"],
+          inserted_at: firmware.inserted_at,
+          updated_at: firmware.updated_at
+        }
+      end)
+      |> Enum.sort_by(& &1.version, :desc)
+
+    latest_version =
+      case List.first(versions) do
+        nil -> "1.0.0"
+        version -> version.version
       end
-
-      %{
-        version: firmware.version,
-        name: firmware.name,
-        url: firmware.url,
-        release_date: metadata["release_date"],
-        changelog: metadata["changelog"] || "No changelog available",
-        mandatory: metadata["mandatory"] || false,
-        file_size: metadata["file_size"],
-        inserted_at: firmware.inserted_at,
-        updated_at: firmware.updated_at
-      }
-    end)
-    |> Enum.sort_by(&(&1.version), :desc)
-
-    latest_version = case List.first(versions) do
-      nil -> "1.0.0"
-      version -> version.version
-    end
 
     json(conn, %{
       firmware_versions: versions,
@@ -3186,42 +3216,45 @@ defmodule BlogEngineWeb.ApiController do
     firmware_version = params["firmware_version"] || get_latest_firmware_version()
     mandatory = params["mandatory"] || false
 
-    results = Enum.map(device_ids, fn device_id ->
-      device = BlogEngine.Settings.get_device_by_name(device_id)
+    results =
+      Enum.map(device_ids, fn device_id ->
+        device = BlogEngine.Settings.get_device_by_name(device_id)
 
-      if device do
-        # Send OTA command
-        ota_command = %{
-          "action" => "start_ota",
-          "firmware_version" => firmware_version,
-          "download_url" => "/firmware/#{device_id}/#{firmware_version}",
-          "mandatory" => mandatory
-        }
+        if device do
+          # Send OTA command
+          ota_command = %{
+            "action" => "start_ota",
+            "firmware_version" => firmware_version,
+            "download_url" => "/firmware/#{device_id}/#{firmware_version}",
+            "mandatory" => mandatory
+          }
 
-        send_device_command(device.name, %{
-          "action" => "ota_update",
-          "format" => "ota",
-          "reps" => 1,
-          "delay" => 0,
-          "uuid" => Ecto.UUID.generate(),
-          "pin" => 0,
-          "ota_command" => ota_command
-        })
+          send_device_command(device.name, %{
+            "action" => "ota_update",
+            "format" => "ota",
+            "reps" => 1,
+            "delay" => 0,
+            "uuid" => Ecto.UUID.generate(),
+            "pin" => 0,
+            "ota_command" => ota_command
+          })
 
-        # Log batch OTA trigger
-        BlogEngine.Settings.create_firmware_log(%{
-          device_id: device.id,
-          action: "batch_ota_trigger",
-          version: firmware_version
-        })
+          # Log batch OTA trigger
+          BlogEngine.Settings.create_firmware_log(%{
+            device_id: device.id,
+            action: "batch_ota_trigger",
+            version: firmware_version
+          })
 
-        %{device_id: device_id, status: "triggered"}
-      else
-        %{device_id: device_id, status: "not_found"}
-      end
-    end)
+          %{device_id: device_id, status: "triggered"}
+        else
+          %{device_id: device_id, status: "not_found"}
+        end
+      end)
 
-    Logger.info("Batch OTA update triggered for #{length(device_ids)} devices to version #{firmware_version}")
+    Logger.info(
+      "Batch OTA update triggered for #{length(device_ids)} devices to version #{firmware_version}"
+    )
 
     json(conn, %{
       batch_update: %{
@@ -3243,14 +3276,14 @@ defmodule BlogEngineWeb.ApiController do
 
   defp get_latest_firmware() do
     BlogEngine.Settings.list_firmwares()
-    |> Enum.sort_by(&(&1.version), :desc)
+    |> Enum.sort_by(& &1.version, :desc)
     |> List.first()
   end
 
   defp get_recent_firmware_logs(device_id, limit \\ 10) do
     BlogEngine.Settings.list_firmware_logs()
     |> Enum.filter(&(&1.device_id == device_id))
-    |> Enum.sort_by(&(&1.inserted_at), :desc)
+    |> Enum.sort_by(& &1.inserted_at, :desc)
     |> Enum.take(limit)
     |> Enum.map(fn log ->
       %{

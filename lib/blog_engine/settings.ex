@@ -11,10 +11,19 @@ defmodule BlogEngine.Settings do
   alias BlogEngine.Settings.DeviceTimeLog
 
   def append_bool_key(params, bool_key) do
+    eval_true_bool = fn ->
+      case Map.get(params, bool_key) do
+        "on" -> true
+        "true" -> true
+        _ -> false
+      end
+    end
+
     if bool_key in Map.keys(params) do
-      params |> Map.put(bool_key, Map.get(params, bool_key) == "on")
+      params |> Map.put(bool_key, eval_true_bool.())
     else
       params |> Map.put(bool_key, false)
+      # params
     end
   end
 
@@ -291,8 +300,6 @@ defmodule BlogEngine.Settings do
   def update_device(model, params) do
     dcg = Device.changeset(model, params) |> Repo.update() |> IO.inspect()
 
-
-
     case dcg do
       {:ok, d} ->
         is_bill_acceptor = fn ->
@@ -302,6 +309,7 @@ defmodule BlogEngine.Settings do
             "pwm_machine"
           end
         end
+
         BlogEngineWeb.Endpoint.broadcast("user:#{d.name}", "settings_response", %{
           "rs232_config" => %{"device_type" => is_bill_acceptor.()},
           "pwm_config" => %{"input_pin" => d.reading_pin}
@@ -1302,8 +1310,12 @@ defmodule BlogEngine.Settings do
   def device_wifi_logs_grouped_datatable(params) do
     parse_int = fn value, default ->
       case value do
-        nil -> default
-        v when is_integer(v) -> v
+        nil ->
+          default
+
+        v when is_integer(v) ->
+          v
+
         v when is_binary(v) ->
           case Integer.parse(v) do
             {i, _} -> i
@@ -1420,8 +1432,12 @@ defmodule BlogEngine.Settings do
   def device_wifi_logs_weekly_in_month_datatable(params) do
     parse_int = fn value, default ->
       case value do
-        nil -> default
-        v when is_integer(v) -> v
+        nil ->
+          default
+
+        v when is_integer(v) ->
+          v
+
         v when is_binary(v) ->
           case Integer.parse(v) do
             {i, _} -> i
@@ -1454,7 +1470,8 @@ defmodule BlogEngine.Settings do
         _ -> Date.utc_today() |> Date.beginning_of_month()
       end
 
-    month_end = month_start |> Date.add(Date.days_in_month(month_start)) # first day of next month
+    # first day of next month
+    month_end = month_start |> Date.add(Date.days_in_month(month_start))
 
     {:ok, start_datetime} = NaiveDateTime.from_erl({month_start |> Date.to_erl(), {0, 0, 0}})
     {:ok, end_datetime} = NaiveDateTime.from_erl({month_end |> Date.to_erl(), {0, 0, 0}})
