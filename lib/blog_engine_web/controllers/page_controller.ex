@@ -237,15 +237,7 @@ defmodule BlogEngineWeb.PageController do
       BlogEngine.Settings.get_sale_by_payment_ref(tranID)
       |> IO.inspect(label: "sales_by_payment_ref")
 
-    id =
-      case params |> Map.get("orderid") |> String.replace("SUBS", "") |> Integer.parse() do
-        {id, _} -> id
-        _ -> nil
-      end
-
-    os = BlogEngine.Settings.get_outlet_subscription!(id)
-
-    if os == nil && check == nil && params["status"] == "00" do
+    if check == nil && params["status"] == "00" do
       # probably need to check if the online trx will reach here...
 
       device = BlogEngine.Settings.get_device_by_short_name(params["orderid"])
@@ -421,12 +413,19 @@ defmodule BlogEngineWeb.PageController do
         "tranID" => "3533872197"
       }
 
-      trx_status = params |> Map.get("status")
+      # id =
+      #   case params |> Map.get("orderid") |> String.replace("SUBS", "") |> Integer.parse() do
+      #     {id, _} -> id
+      #     _ -> nil
+      #   end
 
-      if trx_status == "00" do
-        BlogEngine.Settings.update_outlet_subscription(os, %{status: "paid"})
-      else
-      end
+      # os = BlogEngine.Settings.get_outlet_subscription!(id)
+      # trx_status = params |> Map.get("status")
+
+      # if trx_status == "00" do
+      #   BlogEngine.Settings.update_outlet_subscription(os, %{status: "paid"})
+      # else
+      # end
     end
 
     json(conn, %{})

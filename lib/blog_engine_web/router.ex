@@ -40,7 +40,9 @@ defmodule BlogEngineWeb.Router do
         "http://localhost:5174",
         "http://localhost:2578",
         "http://localhost:3000",
-        "http://localhost:8080"
+        "http://localhost:8080",
+        "https://localhost",
+        "capacitor://localhost"
       ]
 
     plug(BlogEngine.ApiAuthorization)
