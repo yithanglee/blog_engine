@@ -13,6 +13,7 @@ defmodule BlogEngine.Settings.OutletSubscription do
     field(:webhook_details, :string)
     field(:status, :string, default: "pending")
     timestamps()
+    field(:subscription_id, :integer)
   end
 
   @doc false
@@ -26,7 +27,8 @@ defmodule BlogEngine.Settings.OutletSubscription do
       :end_date,
       :ref_no,
       :payment_url,
-      :webhook_details
+      :webhook_details,
+      :subscription_id
     ])
     |> validate_required([
       :outlet_id,
