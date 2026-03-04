@@ -7,7 +7,7 @@ use Mix.Config
 # watchers to your application. For example, we use it
 # with webpack to recompile .js and .css sources.
 config :blog_engine, BlogEngineWeb.Endpoint,
-  http: [port: 4060],
+  http: [port: 4075],
   # https: [
   #   port: 4061,
   #   cipher_suite: :strong,

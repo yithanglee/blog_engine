@@ -18,7 +18,6 @@ defmodule Razer do
           {"MYR", "DuitNowSQR"}
       end
 
-
     generate_signature = fn ->
       merchant_id = merchant_id
       verify_key = vkey
@@ -68,6 +67,16 @@ defmodule Razer do
     generate_signature = fn ->
       merchant_id = merchant_id
       verify_key = vkey
+
+      IO.inspect(
+        %{
+          amt: amt,
+          merchant_id: merchant_id,
+          reference_no: reference_no,
+          vkey: vkey
+        },
+        label: "generate_signature"
+      )
 
       str = amt <> merchant_id <> reference_no <> vkey
       IO.puts(str)

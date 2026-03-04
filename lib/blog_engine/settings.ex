@@ -1713,7 +1713,7 @@ defmodule BlogEngine.Settings do
   token2 = "e93U-8-eR5qKAwJxeAmSnv:APA91bFNUaplqITRXqUgS0B2nQbGREqivZ43zo2W0X8arghHRZfwhDntRpwUkMxTn-0s6PRIc5VnSwPZXvt8ayc4jfPQKZht9XHhB0BXAAzOAMezP_i_lX8"
   token3 = "cCUrkp9MTKqAtxZDHtn98k:APA91bExUa1DgRF8KkpwDeH3I6pWIwCkA5wlH_QXs1HUlnJoj0cQ5rWwuI90h1PPiz1aPPauXbAw1GNyfl_2z8Yv71QRvLxoOO74wbXktSGIBqyHk2R_ibs"
   token4 = "eJRAfsja5FVidAk_j-OJLI:APA91bEQHMIvuFCX_7qpXJKDoNbA_wOK9_WT1mbQesdg3cF-91cn4pyk18xQc1fZWm5ZSVxRMGjdvZW7SSIIImRycJkM8vyW4KdqzOpiVcrb3mp1Hey1a7I"
-  tokens = [token, token2, token3]
+  tokens = ["f3pQYoBpTKqPjAkDmiXCgD:APA91bG6JxQ6tgD8IzQnd2ADJB79HQoNuXBvzuH-pr9OK7aTE2Y4HSqrVhbF-ho6Qo44SRCcWIwB-aHcK3PTWejGVkheQVvKG7w67lHayYOPYWmTYDR-ZRE"]
 
 
   Enum.map(tokens, &   BlogEngine.Settings.fcm_publish(0, "Salam Dari DJTECH", "Anda boleh periksa keadaan mesin dari sini", &1))
@@ -2083,6 +2083,59 @@ defmodule BlogEngine.Settings do
   end
 
   def delete_firmware_log(%FirmwareLog{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.Subscription
+
+  def list_subscriptions() do
+    Repo.all(Subscription)
+  end
+
+  def get_subscription!(id) do
+    Repo.get!(Subscription, id)
+  end
+
+  def create_subscription(params \\ %{}) do
+    Subscription.changeset(%Subscription{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_subscription(model, params) do
+    Subscription.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_subscription(%Subscription{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.OutletSubscription
+
+  def list_outlet_subscriptions() do
+    Repo.all(OutletSubscription)
+  end
+
+  def get_outlet_subscription!(id) do
+    Repo.get!(OutletSubscription, id) |> Repo.preload([:outlet])
+  end
+
+  def create_outlet_subscription(params \\ %{}) do
+    subscription = get_subscription!(params["subscription_id"])
+
+    params =
+      params
+      |> Map.merge(%{
+        "start_date" => Date.utc_today(),
+        "end_date" => Timex.shift(Date.utc_today(), months: subscription.duration_in_months)
+      })
+
+    OutletSubscription.changeset(%OutletSubscription{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_outlet_subscription(model, params) do
+    OutletSubscription.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_outlet_subscription(%OutletSubscription{} = model) do
     Repo.delete(model)
   end
 

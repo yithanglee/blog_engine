@@ -14,6 +14,7 @@ defmodule BlogEngine.Application do
       {:service_account,
        File.read!("#{Application.app_dir(:blog_engine) <> "/priv/static"}/service-account.json")
        |> Jason.decode!()}
+      |> IO.inspect()
 
     children = [
       {Goth, name: BlogEngine.Goth, source: source},
@@ -32,7 +33,7 @@ defmodule BlogEngine.Application do
 
     {:ok, pid} = Agent.start_link(fn -> %{} end)
     Process.register(pid, :kv)
-    
+
     # Add ESP32 task queue Agent
     {:ok, esp32_pid} = Agent.start_link(fn -> %{} end)
     Process.register(esp32_pid, :esp32_tasks)
@@ -40,7 +41,7 @@ defmodule BlogEngine.Application do
     # Add device mapping cache Agent
     {:ok, device_pid} = Agent.start_link(fn -> %{} end)
     Process.register(device_pid, :device_cache)
-    
+
     path = File.cwd!() <> "/media"
 
     if File.exists?(path) == false do

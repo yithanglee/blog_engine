@@ -39,7 +39,8 @@ defmodule BlogEngineWeb.Router do
         "http://localhost:5173",
         "http://localhost:5174",
         "http://localhost:2578",
-        "http://localhost:3000"
+        "http://localhost:3000",
+        "http://localhost:8080"
       ]
 
     plug(BlogEngine.ApiAuthorization)
@@ -91,18 +92,18 @@ defmodule BlogEngineWeb.Router do
 
     get "/webhook", ApiController, :get
     post "/webhook", ApiController, :post
-    
+
     # ESP32 HTTP polling endpoints (existing)
     get "/poll/:device_id", ApiController, :esp32_poll
     get "/stream/:device_id", ApiController, :esp32_stream
     post "/complete/:device_id", ApiController, :esp32_complete
-    
+
     # A7670C cellular device endpoints
     post "/a7670c/join", ApiController, :a7670c_join
     get "/a7670c/poll/:device_id", ApiController, :a7670c_poll
     post "/a7670c/reading/:device_id", ApiController, :a7670c_reading
     get "/a7670c/commands/:device_id", ApiController, :a7670c_commands
-    
+
     # OTA update endpoints
     post "/ota/trigger/:device_id", ApiController, :trigger_ota_update
     get "/ota/status/:device_id", ApiController, :get_ota_status
@@ -112,13 +113,13 @@ defmodule BlogEngineWeb.Router do
 
   scope "/firmware", BlogEngineWeb do
     pipe_through :plain_api
-    
+
     # Check for firmware updates
     get "/check/:device_id", PageController, :check_firmware_version
-    
+
     # Download firmware binary
     get "/:device_id/:version", PageController, :firmware_download
-    
+
     # OTA status reporting from devices
     post "/status/:device_id", ApiController, :ota_status_report
   end
@@ -181,7 +182,7 @@ defmodule BlogEngineWeb.Router do
 
   scope "/", BlogEngineWeb do
     pipe_through :browser_blank
-
+    get "/subscription_payment", PageController, :subscription_payment
     get "/test_razer", PageController, :razer_payment
     post "/test_razer", PageController, :razer_payment
     post "/thank_you", PageController, :thank_you
