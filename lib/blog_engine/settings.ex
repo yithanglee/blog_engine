@@ -2148,7 +2148,7 @@ defmodule BlogEngine.Settings do
   end
 
   def get_invoice!(id) do
-    Repo.get!(Invoice, id)
+    Repo.get!(Invoice, id) |> Repo.preload([:outlet_subscriptions, :outlets])
   end
 
   def create_invoice(params \\ %{}) do

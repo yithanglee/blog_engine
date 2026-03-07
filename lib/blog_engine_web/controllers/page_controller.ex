@@ -155,16 +155,26 @@ defmodule BlogEngineWeb.PageController do
     )
   end
 
-  def subscription_payment(conn, %{"chan" => chan, "amt" => amt, "ref_no" => ref} = params) do
+  def subscription_payment(conn, %{"chan" => chan, "amt" => _amt, "ref_no" => ref} = params) do
     id =
       ref
       |> String.replace("SUBS", "")
 
-    sales = BlogEngine.Settings.get_outlet_subscription!(id) |> IO.inspect(label: "outlet subs")
+    invoice = BlogEngine.Settings.get_invoice!(id) |> IO.inspect(label: "invoice")
+    outlet = invoice.outlets |> List.first()
+
+    amt = invoice.grand_total
 
     conn
     |> redirect(
-      external: Razer.payment_page(chan, amt, ref, sales.outlet.mcode, sales.outlet.mkey)
+      external:
+        Razer.payment_page(
+          chan,
+          "#{amt}",
+          ref,
+          "djtechplt_Dev",
+          "e37344c535a8d12000294306994251a3"
+        )
     )
   end
 
@@ -236,14 +246,6 @@ defmodule BlogEngineWeb.PageController do
     check =
       BlogEngine.Settings.get_sale_by_payment_ref(tranID)
       |> IO.inspect(label: "sales_by_payment_ref")
-
-    id =
-      case params |> Map.get("orderid") |> String.replace("SUBS", "") |> Integer.parse() do
-        {id, _} -> id
-        _ -> nil
-      end
-
-    IEx.pry()
 
     if !String.contains?(params["orderid"], "SUBS") && check == nil && params["status"] == "00" do
       # probably need to check if the online trx will reach here...
@@ -404,29 +406,41 @@ defmodule BlogEngineWeb.PageController do
       # probably a subscription payment
 
       sample = %{
-        "amount" => "1.00",
+        "amount" => "1.10",
         "appcode" => "",
-        "channel" => "maybank2u",
+        "channel" => "TNG-EWALLET",
         "currency" => "RM",
         "domain" => "djtechplt_Dev",
         "error_code" => "",
         "error_desc" => "",
-        "extraP" =>
-          "{\"fpx_buyer_name\":\"LEE YIT HANG\",\"fpx_txn_id\":\"2603031009300432\",\"metadata\":\"[]\"}",
+        "extraP" => "{\"metadata\":\"[]\"}",
         "nbcb" => "2",
         "orderid" => "SUBS1",
-        "paydate" => "2026-03-03 10:09:27",
-        "skey" => "2cd9f7ea1800a555de2c9db2370cc79c",
+        "paydate" => "2026-03-07 17:42:17",
+        "skey" => "e1cd15589f9cfbe146814753424e0beb",
         "status" => "00",
-        "tranID" => "3533872197"
+        "tranID" => "3545036806"
       }
 
-      os = BlogEngine.Settings.get_outlet_subscription!(id)
+      id =
+        case params |> Map.get("orderid") |> String.replace("SUBS", "") |> Integer.parse() do
+          {id, _} -> id
+          _ -> nil
+        end
+
+      invoice = BlogEngine.Settings.get_invoice!(id)
       trx_status = params |> Map.get("status")
 
       if trx_status == "00" do
-        BlogEngine.Settings.update_outlet_subscription(os, %{status: "paid"})
+        BlogEngine.Settings.update_invoice(invoice, %{
+          status: "paid"
+          # webhook_details: params |> Jason.encode!()
+        })
       else
+        BlogEngine.Settings.update_invoice(invoice, %{
+          status: "failed"
+          # webhook_details: params |> Jason.encode!()
+        })
       end
     end
 
@@ -856,21 +870,28 @@ defmodule BlogEngineWeb.PageController do
     }
 
     if Map.get(params, "orderid") do
-      sale =
-        BlogEngine.Settings.get_sale!(
-          Map.get(params, "orderid")
-          |> String.replace("#{Application.get_env(:blog_engine, :revenue_monster)[:prefix]}", "")
+      if String.contains?(params["orderid"], "SUBS") do
+        render(conn, "thank_you.html", params)
+      else
+        sale =
+          BlogEngine.Settings.get_sale!(
+            Map.get(params, "orderid")
+            |> String.replace(
+              "#{Application.get_env(:blog_engine, :revenue_monster)[:prefix]}",
+              ""
+            )
+          )
+          |> IO.inspect()
+
+        outlet = BlogEngine.Settings.get_outlet!(sale.outlet_id)
+
+        device = sale.device
+
+        conn
+        |> redirect(
+          external: "https://iot.djtech4u.com/?d=#{device.name}&location=#{outlet.subdomain}"
         )
-        |> IO.inspect()
-
-      outlet = BlogEngine.Settings.get_outlet!(sale.outlet_id)
-
-      device = sale.device
-
-      conn
-      |> redirect(
-        external: "https://iot.djtech4u.com/?d=#{device.name}&location=#{outlet.subdomain}"
-      )
+      end
     else
       render(conn, "thank_you.html", params)
     end

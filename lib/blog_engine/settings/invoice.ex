@@ -4,12 +4,16 @@ defmodule BlogEngine.Settings.Invoice do
 
   schema "invoices" do
     field(:grand_total, :float)
-    field(:organization_id, :integer)
+    # field(:organization_id, :integer)
+    belongs_to(:organization, BlogEngine.Settings.Organization)
+    has_many(:outlet_subscriptions, BlogEngine.Settings.OutletSubscription)
+    has_many(:outlets, through: [:outlet_subscriptions, :outlet])
     field(:payment_url, :string)
     field(:ref_no, :string)
     field(:remarks, :string)
     field(:staff_id, :integer)
     field(:webhook_details, :string)
+    field(:status, :string)
 
     timestamps()
   end
@@ -18,6 +22,7 @@ defmodule BlogEngine.Settings.Invoice do
   def changeset(invoice, attrs) do
     invoice
     |> cast(attrs, [
+      :status,
       :organization_id,
       :ref_no,
       :remarks,
