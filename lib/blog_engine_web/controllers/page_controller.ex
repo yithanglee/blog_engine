@@ -187,7 +187,7 @@ defmodule BlogEngineWeb.PageController do
       "error_code" => "",
       "error_desc" => "",
       "nbcb" => "1",
-      "orderid" => "d48a-fc602",
+      "orderid" => "441d-64cc4fbc",
       "paydate" => "2025-01-09 22:33:09",
       "skey" => "6158bfa4cecf2c9bd10dc26bbb5d2fd1",
       "status" => "00",
@@ -205,7 +205,7 @@ defmodule BlogEngineWeb.PageController do
       "extraP" =>
         "{\"DbtrAgt\":\"MBBEMYKL\",\"DbtrAcct_Type\":\"SVGS\",\"TxnType\":\"DOMESTIC\",\"refundability\":\"true\",\"bank_issuer\":\"Maybank Berhad\",\"duitnowqr_indicator\":\"20240914MBBEMYKL030OQR71089433\"}",
       "nbcb" => "2",
-      "orderid" => "DEMO637",
+      "orderid" => "441d-64cc4fbc",
       "paydate" => "2024-09-14 07:29:12",
       "skey" => "510f3836a7422a75a683c97b6ce171ca",
       "status" => "00",
@@ -237,7 +237,15 @@ defmodule BlogEngineWeb.PageController do
       BlogEngine.Settings.get_sale_by_payment_ref(tranID)
       |> IO.inspect(label: "sales_by_payment_ref")
 
-    if check == nil && params["status"] == "00" do
+    id =
+      case params |> Map.get("orderid") |> String.replace("SUBS", "") |> Integer.parse() do
+        {id, _} -> id
+        _ -> nil
+      end
+
+    IEx.pry()
+
+    if !String.contains?(params["orderid"], "SUBS") && check == nil && params["status"] == "00" do
       # probably need to check if the online trx will reach here...
 
       device = BlogEngine.Settings.get_device_by_short_name(params["orderid"])
@@ -413,19 +421,13 @@ defmodule BlogEngineWeb.PageController do
         "tranID" => "3533872197"
       }
 
-      # id =
-      #   case params |> Map.get("orderid") |> String.replace("SUBS", "") |> Integer.parse() do
-      #     {id, _} -> id
-      #     _ -> nil
-      #   end
+      os = BlogEngine.Settings.get_outlet_subscription!(id)
+      trx_status = params |> Map.get("status")
 
-      # os = BlogEngine.Settings.get_outlet_subscription!(id)
-      # trx_status = params |> Map.get("status")
-
-      # if trx_status == "00" do
-      #   BlogEngine.Settings.update_outlet_subscription(os, %{status: "paid"})
-      # else
-      # end
+      if trx_status == "00" do
+        BlogEngine.Settings.update_outlet_subscription(os, %{status: "paid"})
+      else
+      end
     end
 
     json(conn, %{})

@@ -2120,10 +2120,12 @@ defmodule BlogEngine.Settings do
 
   def create_outlet_subscription(params \\ %{}) do
     subscription = get_subscription!(params["subscription_id"])
+    device = get_device!(params["device_id"])
 
     params =
       params
       |> Map.merge(%{
+        "outlet_id" => device.outlet_id,
         "start_date" => Date.utc_today(),
         "end_date" => Timex.shift(Date.utc_today(), months: subscription.duration_in_months)
       })
@@ -2136,6 +2138,28 @@ defmodule BlogEngine.Settings do
   end
 
   def delete_outlet_subscription(%OutletSubscription{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.Invoice
+
+  def list_invoices() do
+    Repo.all(Invoice)
+  end
+
+  def get_invoice!(id) do
+    Repo.get!(Invoice, id)
+  end
+
+  def create_invoice(params \\ %{}) do
+    Invoice.changeset(%Invoice{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_invoice(model, params) do
+    Invoice.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_invoice(%Invoice{} = model) do
     Repo.delete(model)
   end
 

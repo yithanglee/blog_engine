@@ -31,6 +31,7 @@ defmodule BlogEngineWeb.Router do
 
     plug CORSPlug,
       origin: [
+        "https://47f09e2f-ab2d-4e51-805d-8114c357b567.lovableproject.com",
         "https://fonts.gstatic.com",
         "https://svt_blog.damienslab.com",
         "http://svt_blog.damienslab.com",
@@ -40,9 +41,7 @@ defmodule BlogEngineWeb.Router do
         "http://localhost:5174",
         "http://localhost:2578",
         "http://localhost:3000",
-        "http://localhost:8080",
-        "https://localhost",
-        "capacitor://localhost"
+        "http://localhost:8080"
       ]
 
     plug(BlogEngine.ApiAuthorization)
@@ -59,6 +58,7 @@ defmodule BlogEngineWeb.Router do
 
     plug CORSPlug,
       origin: [
+        "https://47f09e2f-ab2d-4e51-805d-8114c357b567.lovableproject.com",
         "https://fonts.gstatic.com",
         "https://svt_blog.damienslab.com",
         "http://svt_blog.damienslab.com",
@@ -138,7 +138,7 @@ defmodule BlogEngineWeb.Router do
   scope "/svt_api", BlogEngineWeb do
     pipe_through :svt_api
     get "/stream", ApiController, :stream_get
-    options("/:webhook", ApiController, :get)
+    options("/webhook", ApiController, :get)
 
     get "/webhook", ApiController, :get
     post "/webhook", ApiController, :post

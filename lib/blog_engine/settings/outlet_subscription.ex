@@ -12,6 +12,9 @@ defmodule BlogEngine.Settings.OutletSubscription do
     field(:start_date, :date)
     field(:webhook_details, :string)
     field(:status, :string, default: "pending")
+    # field(:device_id, :integer)
+    belongs_to(:device, BlogEngine.Settings.Device)
+    belongs_to(:invoice, BlogEngine.Settings.Invoice)
     timestamps()
     field(:subscription_id, :integer)
   end
@@ -20,6 +23,8 @@ defmodule BlogEngine.Settings.OutletSubscription do
   def changeset(outlet_subscription, attrs) do
     outlet_subscription
     |> cast(attrs, [
+      :invoice_id,
+      :device_id,
       :status,
       :outlet_id,
       :amount,
@@ -31,11 +36,12 @@ defmodule BlogEngine.Settings.OutletSubscription do
       :subscription_id
     ])
     |> validate_required([
-      :outlet_id,
+      # :outlet_id,
+      :device_id,
       :amount,
       :start_date,
-      :end_date,
-      :ref_no
+      :end_date
+      # :ref_no
       # :payment_url,
       # :webhook_details
     ])
