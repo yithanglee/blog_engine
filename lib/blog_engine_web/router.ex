@@ -31,7 +31,6 @@ defmodule BlogEngineWeb.Router do
 
     plug CORSPlug,
       origin: [
-        "https://47f09e2f-ab2d-4e51-805d-8114c357b567.lovableproject.com",
         "https://fonts.gstatic.com",
         "https://svt_blog.damienslab.com",
         "http://svt_blog.damienslab.com",
@@ -58,7 +57,6 @@ defmodule BlogEngineWeb.Router do
 
     plug CORSPlug,
       origin: [
-        "https://47f09e2f-ab2d-4e51-805d-8114c357b567.lovableproject.com",
         "https://fonts.gstatic.com",
         "https://svt_blog.damienslab.com",
         "http://svt_blog.damienslab.com",

@@ -2798,6 +2798,7 @@ defmodule BlogEngineWeb.ApiController do
   """
   def a7670c_join(conn, %{"device_id" => device_id} = params) do
     Logger.info("A7670C device joined: #{device_id}")
+    # todo update the firmware based on the params
 
     # Use cached device ID for database operations
     device_db_id = get_device_id_with_cache(device_id)
