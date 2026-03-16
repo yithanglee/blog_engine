@@ -156,6 +156,94 @@ defmodule BlogEngineWeb.PageController do
   end
 
   def subscription_payment(conn, %{"chan" => chan, "amt" => _amt, "ref_no" => ref} = params) do
+    # using billplz service
+
+    id =
+      case params |> Map.get("ref_no") |> String.replace("SUBS", "") |> Integer.parse() do
+        {id, _} -> id
+        _ -> nil
+      end
+
+    invoice = BlogEngine.Settings.get_invoice!(id)
+
+    billplz_res =
+      Billplz.create_bill(
+        email: "jdtech@gmail.com",
+        mobile: invoice.organization.phone,
+        name: invoice.organization.name,
+        amount: invoice.grand_total,
+        reference_no: ref,
+        callback_url:
+          Application.get_env(:blog_engine, :billplz)[:callback] <> "/api/billplz_callback",
+        description: "Subscription Payment"
+      )
+
+    {:ok, invoice} =
+      BlogEngine.Settings.update_invoice(invoice, %{
+        payment_webhook: elem(billplz_res, 1) |> Jason.encode!()
+      })
+      |> IO.inspect()
+
+    case billplz_res do
+      {:ok, resp} ->
+        {:ok, invoice} =
+          BlogEngine.Settings.update_invoice(invoice, %{
+            payment_url: resp["url"]
+          })
+
+        conn
+        |> redirect(external: resp["url"])
+
+      _ ->
+        conn
+        |> put_flash(:error, "Something went wrong")
+        |> redirect(to: "/")
+    end
+  end
+
+  def billplz_callback(conn, params) do
+    IO.inspect(params)
+
+    sample = %{
+      "amount" => "110",
+      "collection_id" => "cv91igee",
+      "due_at" => "2026-3-16",
+      "email" => "jdtech@gmail.com",
+      "id" => "0093f13b46e7388d",
+      "mobile" => "+60132664254",
+      "name" => "DJTECH",
+      "paid" => "true",
+      "paid_amount" => "110",
+      "paid_at" => "2026-03-16 23:32:44 +0800",
+      "state" => "paid",
+      "url" => "https://www.billplz.com/bills/0093f13b46e7388d",
+      "x_signature" => "c606f0cfa64803be0fea2e858eeae8441c39744614d050957abaa742b7e38f38"
+    }
+
+    invoice = BlogEngine.Settings.get_invoice_by_payment_url(params["url"])
+
+    case params["paid"] do
+      "true" ->
+        BlogEngine.Settings.update_invoice(invoice, %{
+          status: :paid,
+          payment_webhook: params |> Jason.encode!()
+        })
+
+        invoice.outlet_subscriptions
+        |> Enum.map(&(&1 |> BlogEngine.Settings.update_outlet_subscription(%{status: "active"})))
+
+      _ ->
+        BlogEngine.Settings.update_invoice(invoice, %{
+          status: :failed,
+          payment_webhook: params |> Jason.encode!()
+        })
+    end
+
+    conn = put_status(conn, 200)
+    json(conn, %{status: "ok"})
+  end
+
+  def _subscription_payment(conn, %{"chan" => chan, "amt" => _amt, "ref_no" => ref} = params) do
     id =
       ref
       |> String.replace("SUBS", "")

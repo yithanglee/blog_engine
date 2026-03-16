@@ -76,6 +76,7 @@ defmodule BlogEngineWeb.Router do
 
     post "/callback/razer", PageController, :notification
     post "/notification/razer", PageController, :notification
+    post "/billplz_callback", PageController, :billplz_callback
   end
 
   scope "/ngrok", BlogEngineWeb do

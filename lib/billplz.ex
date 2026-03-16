@@ -1,9 +1,12 @@
 defmodule Billplz do
   require Logger
 
-  @endpoint Application.compile_env(:blog_engine, :billplz)[:endpoint] || "https://www.billplz.com/api/v3"
-  @api_key Application.compile_env(:blog_engine, :billplz)[:key]
+  @endpoint Application.get_env(:blog_engine, :billplz)[:endpoint] ||
+              "https://www.billplz.com/api/v3"
+  @api_key Application.get_env(:blog_engine, :billplz)[:key] || ""
+  require IEx
 
+  @spec create_bill(nil | maybe_improper_list() | map()) :: {:error, any()} | {:ok, any()}
   def create_bill(params) do
     url = "#{@endpoint}/bills"
 
@@ -15,18 +18,29 @@ defmodule Billplz do
         _ -> 0
       end
 
-    body = %{
-      "collection_id" => params[:collection_id],
-      "email" => params[:email],
-      "mobile" => params[:mobile],
-      "name" => params[:name],
-      "amount" => amount,
-      "callback_url" => params[:callback_url],
-      "description" => params[:description] || "Payment for Invoices",
-      "redirect_url" => params[:redirect_url]
-    }
-    |> Enum.reject(fn {_, v} -> is_nil(v) end)
-    |> Enum.into(%{})
+    collection =
+      case get_or_create_collection(%{title: "Subscription Payment"}) do
+        {:ok, collection} ->
+          collection
+
+        {:error, reason} ->
+          Logger.error("Billplz get_or_create_collection failed: #{inspect(reason)}")
+          nil
+      end
+
+    body =
+      %{
+        "collection_id" => collection["id"],
+        "email" => params[:email],
+        "mobile" => params[:mobile],
+        "name" => params[:name],
+        "amount" => amount,
+        "callback_url" => params[:callback_url],
+        "description" => params[:description] || "Payment for Invoices",
+        "redirect_url" => params[:redirect_url]
+      }
+      |> Enum.reject(fn {_, v} -> is_nil(v) end)
+      |> Enum.into(%{})
 
     headers = [
       {"Authorization", "Basic " <> Base.encode64(@api_key <> ":")},
@@ -64,6 +78,22 @@ defmodule Billplz do
 
       {:error, %HTTPoison.Error{reason: reason}} ->
         Logger.error("Billplz get_bill request failed: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  def get_or_create_collection(%{title: _title} = params) do
+    headers = [
+      {"Authorization", "Basic " <> Base.encode64(@api_key <> ":")},
+      {"Content-Type", "application/json"}
+    ]
+
+    case HTTPoison.post(@endpoint <> "/collections", Jason.encode!(params), headers) do
+      {:ok, response} ->
+        {:ok, Jason.decode!(response.body)}
+
+      {:error, reason} ->
+        Logger.log(:error, "Billplz::get_or_create_collection: #{reason}")
         {:error, reason}
     end
   end

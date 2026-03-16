@@ -93,7 +93,7 @@ config :blog_engine, :revenue_monster,
 config :blog_engine, :billplz,
   key: System.get_env("BILLPLZ_API_KEY"),
   endpoint: System.get_env("BILLPLZ_API_ENDPOINT"),
-  callback: System.get_env("BILLPLZ_API_CALLBACK_URL")
+  callback: System.get_env("BILLPLZ_API_CALLBACK")
 
 config :blog_engine, :razer,
   vkey: System.get_env("RAZER_VKEY"),

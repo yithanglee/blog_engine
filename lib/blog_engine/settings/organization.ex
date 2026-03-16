@@ -9,6 +9,7 @@ defmodule BlogEngine.Settings.Organization do
     field(:bank_name, :string)
     field(:contact_person, :string)
     field(:desc, :string)
+    field(:email, :string)
     field(:img_url, :string)
     field(:name, :string)
     field(:phone, :string)
@@ -25,6 +26,7 @@ defmodule BlogEngine.Settings.Organization do
       :name,
       :desc,
       :address,
+      :email,
       :img_url,
       :reg_no,
       :phone,

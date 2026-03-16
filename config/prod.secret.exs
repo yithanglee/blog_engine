@@ -47,7 +47,7 @@ config :blog_engine, release: :prod
 config :blog_engine, :billplz,
   key: System.get_env("BILLPLZ_API_KEY_PROD"),
   endpoint: System.get_env("BILLPLZ_API_ENDPOINT_PROD"),
-  callback: System.get_env("BILLPLZ_API_CALLBACK_URL_PROD")
+  callback: System.get_env("BILLPLZ_API_CALLBACK_PROD")
 
 config :blog_engine, :razer,
   vkey: System.get_env("RAZER_VKEY_PROD"),
