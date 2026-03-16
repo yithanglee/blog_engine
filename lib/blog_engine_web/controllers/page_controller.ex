@@ -335,7 +335,7 @@ defmodule BlogEngineWeb.PageController do
       BlogEngine.Settings.get_sale_by_payment_ref(tranID)
       |> IO.inspect(label: "sales_by_payment_ref")
 
-    if !String.contains?(params["orderid"], "SUBS") && check == nil && params["status"] == "00" do
+    if check == nil && params["status"] == "00" do
       # probably need to check if the online trx will reach here...
 
       device = BlogEngine.Settings.get_device_by_short_name(params["orderid"])
@@ -491,45 +491,6 @@ defmodule BlogEngineWeb.PageController do
       })
       |> IO.inspect()
     else
-      # probably a subscription payment
-
-      sample = %{
-        "amount" => "1.10",
-        "appcode" => "",
-        "channel" => "TNG-EWALLET",
-        "currency" => "RM",
-        "domain" => "djtechplt_Dev",
-        "error_code" => "",
-        "error_desc" => "",
-        "extraP" => "{\"metadata\":\"[]\"}",
-        "nbcb" => "2",
-        "orderid" => "SUBS1",
-        "paydate" => "2026-03-07 17:42:17",
-        "skey" => "e1cd15589f9cfbe146814753424e0beb",
-        "status" => "00",
-        "tranID" => "3545036806"
-      }
-
-      id =
-        case params |> Map.get("orderid") |> String.replace("SUBS", "") |> Integer.parse() do
-          {id, _} -> id
-          _ -> nil
-        end
-
-      invoice = BlogEngine.Settings.get_invoice!(id)
-      trx_status = params |> Map.get("status")
-
-      if trx_status == "00" do
-        BlogEngine.Settings.update_invoice(invoice, %{
-          status: "paid"
-          # webhook_details: params |> Jason.encode!()
-        })
-      else
-        BlogEngine.Settings.update_invoice(invoice, %{
-          status: "failed"
-          # webhook_details: params |> Jason.encode!()
-        })
-      end
     end
 
     json(conn, %{})
