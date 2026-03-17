@@ -6,7 +6,9 @@ defmodule BlogEngine.Settings.Invoice do
     field(:grand_total, :float)
     # field(:organization_id, :integer)
     belongs_to(:organization, BlogEngine.Settings.Organization)
-    has_many(:outlet_subscriptions, BlogEngine.Settings.OutletSubscription)
+
+    has_many(:outlet_subscriptions, BlogEngine.Settings.OutletSubscription, on_delete: :delete_all)
+
     has_many(:outlets, through: [:outlet_subscriptions, :outlet])
     field(:payment_url, :string)
     field(:ref_no, :string)

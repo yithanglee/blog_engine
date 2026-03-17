@@ -2119,21 +2119,65 @@ defmodule BlogEngine.Settings do
   end
 
   def create_outlet_subscription(params \\ %{}) do
-    subscription = get_subscription!(params["subscription_id"])
-    device = get_device!(params["device_id"])
-
     params =
-      params
-      |> Map.merge(%{
-        "outlet_id" => device.outlet_id,
-        "start_date" => Date.utc_today(),
-        "end_date" => Timex.shift(Date.utc_today(), months: subscription.duration_in_months)
-      })
+      if params["subscription_id"] != nil do
+        subscription = get_subscription!(params["subscription_id"])
+        device = get_device!(params["device_id"])
+
+        params
+        |> Map.merge(%{
+          "amount" => subscription.amount,
+          "outlet_id" => device.outlet_id,
+          "start_date" => Date.utc_today(),
+          "end_date" => Timex.shift(Date.utc_today(), months: subscription.duration_in_months)
+        })
+      else
+        device = get_device!(params["device_id"])
+
+        params
+        |> Map.merge(%{
+          "amount" => 0,
+          "outlet_id" => device.outlet_id,
+          "start_date" => Date.utc_today(),
+          "end_date" => Date.utc_today()
+        })
+      end
 
     OutletSubscription.changeset(%OutletSubscription{}, params) |> Repo.insert() |> IO.inspect()
   end
 
   def update_outlet_subscription(model, params) do
+    params =
+      if params["subscription_id"] != nil do
+        subscription = get_subscription!(params["subscription_id"])
+        device = get_device!(params["device_id"])
+
+        amount =
+          if params["amount"] != nil and params["amount"] != "" do
+            params["amount"]
+          else
+            subscription.amount
+          end
+
+        params
+        |> Map.merge(%{
+          "amount" => amount,
+          "outlet_id" => device.outlet_id,
+          "start_date" => Date.utc_today(),
+          "end_date" => Timex.shift(Date.utc_today(), months: subscription.duration_in_months)
+        })
+      else
+        device = get_device!(params["device_id"])
+
+        params
+        |> Map.merge(%{
+          "amount" => 0,
+          "outlet_id" => device.outlet_id,
+          "start_date" => Date.utc_today(),
+          "end_date" => Date.utc_today()
+        })
+      end
+
     OutletSubscription.changeset(model, params) |> Repo.update() |> IO.inspect()
   end
 
@@ -2157,7 +2201,32 @@ defmodule BlogEngine.Settings do
   end
 
   def create_invoice(params \\ %{}) do
-    Invoice.changeset(%Invoice{}, params) |> Repo.insert() |> IO.inspect()
+    case Invoice.changeset(%Invoice{}, params) |> Repo.insert() |> IO.inspect() do
+      {:ok, inv} ->
+        outlets =
+          Repo.all(
+            from(o in BlogEngine.Settings.Outlet, where: o.organization_id == ^inv.organization_id)
+          )
+
+        devices =
+          Repo.all(
+            from(d in BlogEngine.Settings.Device,
+              where: d.outlet_id in ^Enum.map(outlets, & &1.id)
+            )
+          )
+
+        for device <- devices do
+          create_outlet_subscription(%{
+            "invoice_id" => inv.id,
+            "device_id" => device.id
+          })
+        end
+
+        {:ok, inv}
+
+      {:error, cg} ->
+        {:error, cg}
+    end
   end
 
   def update_invoice(model, params) do

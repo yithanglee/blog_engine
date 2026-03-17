@@ -166,12 +166,14 @@ defmodule BlogEngineWeb.PageController do
 
     invoice = BlogEngine.Settings.get_invoice!(id)
 
+    grand_total = invoice.outlet_subscriptions |> Enum.map(& &1.amount) |> Enum.sum()
+
     billplz_res =
       Billplz.create_bill(
         email: "jdtech@gmail.com",
         mobile: invoice.organization.phone,
         name: invoice.organization.name,
-        amount: invoice.grand_total,
+        amount: grand_total,
         reference_no: ref,
         callback_url:
           Application.get_env(:blog_engine, :billplz)[:callback] <> "/api/billplz_callback",
@@ -180,6 +182,7 @@ defmodule BlogEngineWeb.PageController do
 
     {:ok, invoice} =
       BlogEngine.Settings.update_invoice(invoice, %{
+        grand_total: grand_total,
         payment_webhook: elem(billplz_res, 1) |> Jason.encode!()
       })
       |> IO.inspect()
