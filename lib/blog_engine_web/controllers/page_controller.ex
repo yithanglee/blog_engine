@@ -170,7 +170,7 @@ defmodule BlogEngineWeb.PageController do
 
     billplz_res =
       Billplz.create_bill(
-        email: "jdtech@gmail.com",
+        email: invoice.organization.email,
         mobile: invoice.organization.phone,
         name: invoice.organization.name,
         amount: grand_total,
