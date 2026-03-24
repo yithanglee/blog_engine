@@ -1,0 +1,206 @@
+<style type="text/css">
+.text-sm {
+  font-size: 0.8rem;
+}
+
+.text-lg {
+  font-size: 24px;
+}
+
+.text-xl {
+  font-size: 32px;
+}
+
+.table th,
+.table td {
+  padding: 4px 16px;
+  vertical-align: middle;
+  border-top: 0px;
+}
+
+table td, table th {
+  border-width: 1px  !important;
+  border-style: solid  !important;
+  border-color: white !important;
+}
+</style>
+
+<div class="container" style="left: 0px; position: absolute; width: 100%;">
+  <title>DJTECH · <%= @title %></title>
+
+  <%
+    currency = "MYR"
+    conversion_rate = 1
+    chunk_no = 10
+    chunked_orders = @order_lines |> Enum.chunk_every(chunk_no) |> Enum.with_index()
+  %>
+
+  <%= for {items, pagination_append} <- chunked_orders do %>
+    <%= if Enum.count(chunked_orders) == 1 do %>
+      <div class="justify-center">
+    <% else %>
+      <div class="justify-center" style="page-break-after: always;">
+    <% end %>
+
+    <div class="card-body d-flex align-items-center justify-content-between" style="min-height: 20vh; margin-bottom: 30px;" id="company_header">
+      <style type="text/css">
+      .text-start {
+        text-align: left !important;
+      }
+      .text-end {
+        text-align: right !important;
+      }
+      table.header {
+        font-size: 90%;
+        width: 100vw;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      table.header td {
+        padding: 8px;
+      }
+      </style>
+      <div style="width: 100%; text-align: center; font-size: 90%;">
+        <div style="height: 60px; background-repeat: no-repeat; background-position: center; background-size: contain; background-image: url('/images/haho_long.png');">
+        </div>
+        <div style="font-weight: bold; margin-bottom: 5px; margin-top: 5px;">DJTECH PLT</div>
+        <div style="margin-bottom: 10px;">
+          No.65 Jalan SL9/9D, Bandar Sg Long,<br>
+          43000 Kajang, Selangor
+        </div>
+        <div>
+          <span style="margin-right: 20px;">Phone: +60162056662</span>
+          <span>Email: jdtechmy@gmail.com</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card-body step_4" style="margin-left: 28px;">
+      <div style="height: 300px; border-top: 1px solid grey; padding-top: 20px">
+        <center class="fw-bold" style="margin-bottom: 10px; margin-right: 90px; font-size: 30px;"><%= @title %></center>
+
+        <table class="pt-2" style="width: 40%; left: 0px; position: absolute;">
+          <tbody id="contact_info">
+            <tr>
+              <th style="width: 100px;" class="text-end">SOLD TO:</th>
+              <td></td>
+              <td>
+                <span id="chosen_pay_to">
+                  <%= if @invoice.organization, do: @invoice.organization.name, else: "N/A" %>
+                </span>
+              </td>
+            </tr>
+          </tbody>
+          <tbody id="contact_info2">
+            <tr valign="top">
+              <th class="text-end">PHONE:</th>
+              <td></td>
+              <td><%= if @invoice.organization, do: @invoice.organization.phone, else: "N/A" %></td>
+            </tr>
+            <tr valign="top">
+              <th class="text-end">EMAIL:</th>
+              <td></td>
+              <td><%= if @invoice.organization, do: @invoice.organization.email, else: "N/A" %></td>
+            </tr>
+            <tr valign="top">
+              <th class="text-end">ADDRESS:</th>
+              <td></td>
+              <td><%= if @invoice.organization, do: @invoice.organization.address, else: "N/A" %></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <table id="doc_info" style="width: 40%; position: absolute; right: 40px;">
+          <tbody>
+            <tr valign="top">
+              <th class="text-end">Invoice No:</th>
+              <td></td>
+              <td>
+                <span id="chosen_ref_no"><%= @invoice.ref_no %></span>
+              </td>
+            </tr>
+            <tr valign="top">
+              <th class="text-end">DATE:</th>
+              <td></td>
+              <td>
+                <span id="chosen_date"><%= @invoice.inserted_at |> Timex.Timezone.convert("GMT+8") |> Timex.format!("%Y-%m-%d %I:%M %p", :strftime) %></span>
+              </td>
+            </tr>
+            <tr valign="top">
+              <th class="text-end">DUE DATE:</th>
+              <td></td>
+              <td>
+                <span id="due_date"><%= @invoice.due_date %></span>
+              </td>
+            </tr>
+            <tr>
+              <th class="text-end">STATUS:</th>
+              <td></td>
+              <td><%= @invoice.status |> String.upcase() %></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <center>
+      <table style="width: 85%;">
+        <thead>
+          <tr>
+            <th class="text-start">No</th>
+            <th class="text-start">Device Name</th>
+            <th class="text-start">Start Date</th>
+            <th class="text-start">End Date</th>
+            <th class="text-end">Subtotal (<%= currency %>)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <%= for {item, idx} <- Enum.with_index(items, 1 + (pagination_append * chunk_no)) do %>
+          <tr style="border-top: 1px solid grey;">
+            <td class="text-start">
+              <div><%= idx %></div>
+            </td>
+            <td class="text-start">
+              <%= if item.device, do: item.device.short_name, else: "N/A" %>
+            </td>
+            <td class="text-start">
+              <%= item.start_date %>
+            </td>
+            <td class="text-start">
+              <%= item.end_date %>
+            </td>
+            <td class="text-end">
+              <%= (item.amount || 0) |> :erlang.float_to_binary(decimals: 2) %>
+            </td>
+          </tr>
+          <% end %>
+          <!-- subtotal --->
+          <tr>
+            <td colspan="4" class="text-end">
+              Subtotal (<%= currency %>)
+            </td>
+            <td class="text-end">
+              <%= (items |> Enum.map(fn item -> item.amount || 0 end) |> Enum.sum()) |> :erlang.float_to_binary(decimals: 2) %>
+            </td>
+          </tr>
+
+          <tr class="fw-bold" style="border-top: 1px solid grey;">
+            <td colspan="4" class="text-end">
+              Grand Total (<%= currency %>)
+            </td>
+            <td class="text-end">
+              <%= (@invoice.grand_total || 0) |> :erlang.float_to_binary(decimals: 2) %>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </center>
+
+    <div style="height: 300px; border-top: 1px solid grey; padding-top: 20px; margin-top: 80px;">
+      <center style="position: relative; bottom: 0px;">
+        *** This is computer generated, no signature required. ***
+      </center>
+    </div>
+  </div>
+  <% end %>
+</div>

@@ -62,6 +62,7 @@ defmodule BlogEngine.Utility do
 
   def build_datatable_query(module, params, opts \\ %{}) do
     repo = get_repo()
+
     additional_joins =
       case Map.get(opts, "additional_joins", "") do
         "" -> []
@@ -74,6 +75,7 @@ defmodule BlogEngine.Utility do
         "" -> []
         _ -> Map.get(opts, "additional_search", "") |> Jason.decode!()
       end
+      |> IO.inspect(label: "additional_search")
 
     additional_order =
       case Map.get(opts, "additional_order", "") do
@@ -198,9 +200,7 @@ defmodule BlogEngine.Utility do
   defp apply_dynamic_order(query, _), do: query
 
   defp apply_dynamic_joins(query, join_statements) do
-
     process_join = fn join_statement, acc ->
-
       %{"assoc" => assoc, "prefix" => prefix, "join_suffix" => join_suffix} = join_statement
 
       # splitted_join_suffix = join_suffix    |> IO.inspect(label: "splitted_join_suffix")
@@ -234,7 +234,7 @@ defmodule BlogEngine.Utility do
 
           "!=" ->
             """
-            #{prefix}.#{column} != ^#{value}
+            #{prefix}.#{column} != ^"#{value}"
             """
 
           "ilike" ->
@@ -244,16 +244,18 @@ defmodule BlogEngine.Utility do
 
           _ ->
             """
-            #{prefix}.#{column} == ^#{value}
+            #{prefix}.#{column} == ^"#{value}"
             """
         end
 
-      inner_join_statements = """
-      import Ecto.Query
+      inner_join_statements =
+        """
+        import Ecto.Query
 
-      acc
-      |> where( [a, b, c, d, e],  #{search_value} )
-      """
+        acc
+        |> where( [a, b, c, d, e],  #{search_value} )
+        """
+        |> IO.inspect(label: "inner_join_statements")
 
       {result, _} = Code.eval_string(inner_join_statements, acc: acc)
       result

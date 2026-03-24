@@ -228,7 +228,7 @@ defmodule BlogEngineWeb.PageController do
     case params["paid"] do
       "true" ->
         BlogEngine.Settings.update_invoice(invoice, %{
-          status: :paid,
+          status: "paid",
           payment_webhook: params |> Jason.encode!()
         })
 
@@ -762,6 +762,76 @@ defmodule BlogEngineWeb.PageController do
     }
 
     IO.puts(pdf_params["html"])
+
+    pdf_binary =
+      PdfGenerator.generate_binary!(
+        pdf_params["html"],
+        size: "A4",
+        shell_params: [
+          "--page-width",
+          "100cm",
+          "--margin-left",
+          "5",
+          "--margin-right",
+          "5",
+          "--margin-top",
+          "5",
+          "--margin-bottom",
+          "5",
+          "--encoding",
+          "utf-8",
+          "--orientation",
+          "Portrait"
+        ],
+        delete_temporary: true
+      )
+
+    conn
+    |> put_resp_content_type("application/pdf")
+    |> put_resp_header(
+      "content-disposition",
+      "attachment; filename=\"Invoice_#{params["id"]}.pdf\""
+    )
+    |> send_resp(200, pdf_binary)
+  end
+
+  def pdf_preview(conn, %{"id" => id, "type" => "invoice"} = params) do
+    invoice = BlogEngine.Settings.get_invoice_with_details!(id)
+
+    conn
+    |> render("invoice_pdf.html",
+      title: "Invoice",
+      invoice: invoice,
+      order_lines: invoice.outlet_subscriptions,
+      layout: {BlogEngineWeb.LayoutView, "blank.html"}
+    )
+  end
+
+  def pdf(conn, %{"id" => id, "type" => "invoice"} = params) do
+    invoice = BlogEngine.Settings.get_invoice_with_details!(id)
+
+    server_url = "http://localhost:4000"
+    server_url = Application.get_env(:blog_engine, :url)
+
+    html =
+      Phoenix.View.render_to_string(
+        BlogEngineWeb.PageView,
+        "invoice_pdf.html",
+        conn: conn,
+        title: "Invoice",
+        invoice: invoice,
+        order_lines: invoice.outlet_subscriptions
+      )
+      |> String.replace("/images", "#{server_url}/images")
+
+    IO.inspect(server_url)
+
+    css =
+      "<link rel='stylesheet' href='#{server_url}/css/app.css' ><link rel='stylesheet' href='#{server_url}/css/all.css' >"
+
+    pdf_params = %{
+      "html" => "<!DOCTYPE html><html><head>#{css}</head><body>#{html}</body></html>"
+    }
 
     pdf_binary =
       PdfGenerator.generate_binary!(

@@ -1335,6 +1335,11 @@ defmodule BlogEngineWeb.ApiController do
           Settings.delete_all_device_log(params["device_id"])
           %{status: "ok"}
 
+        "set_organization_id_null" ->
+          staff = Settings.get_staff!(params["id"])
+          Settings.update_staff(staff, %{"organization_id" => nil})
+          %{status: "ok"}
+
         "gen_static_qr" ->
           device = Settings.get_device_by_name(params["name"]) |> IO.inspect()
 

@@ -2124,22 +2124,36 @@ defmodule BlogEngine.Settings do
         subscription = get_subscription!(params["subscription_id"])
         device = get_device!(params["device_id"])
 
+        start_date =
+          if params["start_date"] in [nil, ""], do: Date.utc_today(), else: params["start_date"]
+
+        end_date =
+          if params["end_date"] in [nil, ""],
+            do: Timex.shift(Date.utc_today(), months: subscription.duration_in_months),
+            else: params["end_date"]
+
         params
         |> Map.merge(%{
           "amount" => subscription.amount,
           "outlet_id" => device.outlet_id,
-          "start_date" => Date.utc_today(),
-          "end_date" => Timex.shift(Date.utc_today(), months: subscription.duration_in_months)
+          "start_date" => start_date,
+          "end_date" => end_date
         })
       else
         device = get_device!(params["device_id"])
+
+        start_date =
+          if params["start_date"] in [nil, ""], do: Date.utc_today(), else: params["start_date"]
+
+        end_date =
+          if params["end_date"] in [nil, ""], do: Date.utc_today(), else: params["end_date"]
 
         params
         |> Map.merge(%{
           "amount" => 0,
           "outlet_id" => device.outlet_id,
-          "start_date" => Date.utc_today(),
-          "end_date" => Date.utc_today()
+          "start_date" => start_date,
+          "end_date" => end_date
         })
       end
 
@@ -2159,23 +2173,44 @@ defmodule BlogEngine.Settings do
             subscription.amount
           end
 
+        start_date =
+          if params["start_date"] in [nil, ""], do: Date.utc_today(), else: params["start_date"]
+
+        end_date =
+          if params["end_date"] in [nil, ""],
+            do: Timex.shift(Date.utc_today(), months: subscription.duration_in_months),
+            else: params["end_date"]
+
         params
         |> Map.merge(%{
           "amount" => amount,
           "outlet_id" => device.outlet_id,
-          "start_date" => Date.utc_today(),
-          "end_date" => Timex.shift(Date.utc_today(), months: subscription.duration_in_months)
+          "start_date" => start_date,
+          "end_date" => end_date
         })
       else
-        device = get_device!(params["device_id"])
+        params =
+          if params["device_id"] != nil do
+            device = get_device!(params["device_id"])
 
-        params
-        |> Map.merge(%{
-          "amount" => 0,
-          "outlet_id" => device.outlet_id,
-          "start_date" => Date.utc_today(),
-          "end_date" => Date.utc_today()
-        })
+            start_date =
+              if params["start_date"] in [nil, ""],
+                do: Date.utc_today(),
+                else: params["start_date"]
+
+            end_date =
+              if params["end_date"] in [nil, ""], do: Date.utc_today(), else: params["end_date"]
+
+            params
+            |> Map.merge(%{
+              "amount" => 0,
+              "outlet_id" => device.outlet_id,
+              "start_date" => start_date,
+              "end_date" => end_date
+            })
+          else
+            params
+          end
       end
 
     OutletSubscription.changeset(model, params) |> Repo.update() |> IO.inspect()
@@ -2193,6 +2228,11 @@ defmodule BlogEngine.Settings do
 
   def get_invoice!(id) do
     Repo.get!(Invoice, id) |> Repo.preload([:organization, :outlet_subscriptions, :outlets])
+  end
+
+  def get_invoice_with_details!(id) do
+    Repo.get!(Invoice, id)
+    |> Repo.preload([:organization, outlet_subscriptions: [:device, :outlet]])
   end
 
   def get_invoice_by_payment_url(url) do

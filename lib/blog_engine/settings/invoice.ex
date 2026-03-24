@@ -16,6 +16,7 @@ defmodule BlogEngine.Settings.Invoice do
     field(:staff_id, :integer)
     field(:webhook_details, :string)
     field(:status, :string)
+    field(:due_date, :date)
 
     timestamps()
   end
@@ -31,7 +32,8 @@ defmodule BlogEngine.Settings.Invoice do
       :staff_id,
       :grand_total,
       :payment_url,
-      :webhook_details
+      :webhook_details,
+      :due_date
     ])
 
     # |> validate_required([:organization_id, :ref_no, :remarks, :staff_id, :grand_total, :payment_url, :webhook_details])

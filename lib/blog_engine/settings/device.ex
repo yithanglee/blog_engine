@@ -27,6 +27,7 @@ defmodule BlogEngine.Settings.Device do
     belongs_to(:executor_board, BlogEngine.Settings.Device, foreign_key: :executor_board_id)
 
     belongs_to(:organization, BlogEngine.Settings.Organization)
+    has_many(:outlet_subscriptions, BlogEngine.Settings.OutletSubscription)
     field(:skip_first, :boolean, default: false)
     timestamps()
   end
@@ -34,7 +35,8 @@ defmodule BlogEngine.Settings.Device do
   @doc false
   def changeset(device, attrs) do
     device
-    |> cast(attrs, [:current_firmware_version,
+    |> cast(attrs, [
+      :current_firmware_version,
       :use_http_polling,
       :is_rs232,
       :is_round_down,
