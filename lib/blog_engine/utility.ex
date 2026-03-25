@@ -110,7 +110,7 @@ defmodule BlogEngine.Utility do
     draw = parseInteger.(params["draw"] || "1")
 
     # Build base query
-    base_query = from(a in module)
+    base_query = from(a in module, order_by: [desc: a.id])
 
     # Apply joins if provided
     base_query =

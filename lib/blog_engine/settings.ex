@@ -2241,6 +2241,30 @@ defmodule BlogEngine.Settings do
   end
 
   def create_invoice(params \\ %{}) do
+    params =
+      params
+      |> Map.put(
+        "ref_no",
+        (fn ->
+           year = Date.utc_today().year
+           year_start = NaiveDateTime.new!(year, 1, 1, 0, 0, 0)
+           next_year_start = NaiveDateTime.new!(year + 1, 1, 1, 0, 0, 0)
+
+           year_count =
+             Repo.aggregate(
+               from(i in Invoice,
+                 where: i.inserted_at >= ^year_start and i.inserted_at < ^next_year_start
+               ),
+               :count,
+               :id
+             )
+
+           seq = year_count + 1
+           seq_str = seq |> Integer.to_string() |> String.pad_leading(3, "0")
+           "INV-#{year}-#{seq_str}"
+         end).()
+      )
+
     case Invoice.changeset(%Invoice{}, params) |> Repo.insert() |> IO.inspect() do
       {:ok, inv} ->
         outlets =
