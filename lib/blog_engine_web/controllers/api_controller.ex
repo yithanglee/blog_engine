@@ -170,7 +170,7 @@ defmodule BlogEngineWeb.ApiController do
             |> Enum.map(fn {k, v} -> {String.to_atom(k), v} end)
             |> Map.new()
 
-          BlogEngine.Utility.get_by(
+          BlogEngine.Utility2.get_by(
             params["model"],
             map
             |> Map.drop([
@@ -181,8 +181,8 @@ defmodule BlogEngineWeb.ApiController do
           |> BluePotion.sanitize_struct()
 
         "datatable" ->
-          BlogEngine.Utility.build_datatable_query(
-            BlogEngine.Utility.modulize_name(params["model"]),
+          BlogEngine.Utility2.build_datatable_query(
+            BlogEngine.Utility2.modulize_name(params["model"]),
             params,
             params
             |> Map.drop([
@@ -1639,6 +1639,31 @@ defmodule BlogEngineWeb.ApiController do
             _ ->
               %{status: "error"}
           end
+
+        "operator_subscribe_plan" ->
+          case Map.get(conn.assigns, :api_auth) do
+            {:admin, username} when is_binary(username) ->
+              case Settings.get_staff_by_username(username) do
+                nil ->
+                  {:error, "Unauthorized."}
+                staff ->
+                case Settings.operator_subscribe_plan_for_staff(staff, params) do
+                  {:ok, map} ->
+                    map
+                  {:error, reason} when is_binary(reason) ->
+                    %{status: "error", reason: reason}
+                  other ->
+                    %{status: "error", reason: inspect(other)}
+                end
+              end
+
+            {:member, _} ->
+              {:error, "This action requires staff sign-in."}
+
+            _ ->
+              {:error, "Unauthorized."}
+          end
+          |> IO.inspect(label: "operator_subscribe_plan")
 
         _ ->
           %{status: "ok"}

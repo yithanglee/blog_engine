@@ -17,6 +17,7 @@ defmodule BlogEngine.Settings.Invoice do
     field(:webhook_details, :string)
     field(:status, :string)
     field(:due_date, :date)
+    field(:payment_method, :string, default: "fpx")
 
     timestamps()
   end
@@ -25,6 +26,7 @@ defmodule BlogEngine.Settings.Invoice do
   def changeset(invoice, attrs) do
     invoice
     |> cast(attrs, [
+      :payment_method,
       :status,
       :organization_id,
       :ref_no,

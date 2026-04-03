@@ -684,6 +684,15 @@ defmodule BlogEngine.Settings do
     Repo.get_by(User, username: username)
   end
 
+  def get_staff_by_username(username) when is_binary(username) do
+    Repo.one(
+      from(s in Staff,
+        where: s.username == ^username,
+        preload: [:organization, role: :app_routes]
+      )
+    )
+  end
+
   def check_staff_password(params) do
     users =
       Repo.all(
@@ -2291,6 +2300,141 @@ defmodule BlogEngine.Settings do
       {:error, cg} ->
         {:error, cg}
     end
+  end
+
+  @doc """
+  Creates one unpaid invoice and a single outlet subscription line for the given
+  device and subscription plan (no per-organization device fan-out).
+  """
+  def create_invoice_for_subscription_plan(%{
+        "organization_id" => org_id,
+        "subscription_id" => sub_id,
+        "device_id" => device_id
+      })
+      when is_integer(org_id) and is_integer(sub_id) and is_integer(device_id) do
+    device = get_device!(device_id)
+
+    if device.organization_id != org_id do
+      {:error, :device_org_mismatch}
+    else
+      subscription = get_subscription!(sub_id)
+
+      ref_no =
+        (fn ->
+           year = Date.utc_today().year
+           year_start = NaiveDateTime.new!(year, 1, 1, 0, 0, 0)
+           next_year_start = NaiveDateTime.new!(year + 1, 1, 1, 0, 0, 0)
+
+           year_count =
+             Repo.aggregate(
+               from(i in Invoice,
+                 where: i.inserted_at >= ^year_start and i.inserted_at < ^next_year_start
+               ),
+               :count,
+               :id
+             )
+
+           seq = year_count + 1
+           seq_str = seq |> Integer.to_string() |> String.pad_leading(3, "0")
+           "INV-#{year}-#{seq_str}"
+         end).()
+
+      due_date = Date.utc_today() |> Date.add(14)
+
+      invoice_attrs = %{
+        "organization_id" => org_id,
+        "status" => "pending",
+        "grand_total" => subscription.amount,
+        "due_date" => due_date,
+        "remarks" => "Subscription plan: #{subscription.name}",
+        "ref_no" => ref_no
+      }
+
+      Multi.new()
+      |> Multi.insert(:invoice, Invoice.changeset(%Invoice{}, invoice_attrs))
+      |> Multi.run(:outlet_subscription, fn _repo, %{invoice: inv} ->
+        create_outlet_subscription(%{
+          "invoice_id" => inv.id,
+          "device_id" => device_id,
+          "subscription_id" => sub_id
+        })
+      end)
+      |> Repo.transaction() |> IO.inspect(label: "Repo.transaction")
+      |> case do
+        {:ok, %{invoice: inv, outlet_subscription: os}} ->
+          {:ok, %{invoice: inv, outlet_subscription: os}}
+
+        {:ok, %{outlet_subscription: {:error, cg}}} ->
+          {:error, cg}
+
+        {:error, _step, failed_val, _changes} ->
+          {:error, failed_val}
+
+        other ->
+          {:error, other}
+      end
+    end
+  end
+
+  @doc """
+  Staff-only flow: validate org and ids, then create invoice + outlet subscription line.
+  Caller must ensure `staff` matches the authenticated subject from `ApiAuthorization` (`:api_auth`).
+  """
+  def operator_subscribe_plan_for_staff(%Staff{} = staff, params) when is_map(params) do
+    cond do
+      staff.organization_id == nil ->
+        {:error, "Your account has no organization."}
+
+      true ->
+        with {:ok, org_id} <- parse_operator_subscribe_id(params["organization_id"]),
+             {:ok, sub_id} <- parse_operator_subscribe_id(params["subscription_id"]),
+             {:ok, device_id} <- parse_operator_subscribe_id(params["device_id"]) do
+          if staff.organization_id != org_id do
+            {:error, "You can only subscribe for your own organization."}
+          else
+            case create_invoice_for_subscription_plan(%{
+                   "organization_id" => org_id,
+                   "subscription_id" => sub_id,
+                   "device_id" => device_id
+                 }) |> IO.inspect(label: "create_invoice_for_subscription_plan") do
+              {:ok, %{invoice: inv, outlet_subscription: outlet_subscription}} ->
+                {:ok, %{status: "ok", invoice_id: inv.id, ref_no: inv.ref_no}}
+
+              {:error, :device_org_mismatch} ->
+                {:error, "Device does not belong to your organization."}
+
+              {:error, %Ecto.Changeset{} = cg} ->
+                {:error, format_operator_subscribe_changeset_errors(cg)}
+
+              {:error, other} ->
+                {:error, inspect(other)}
+            end
+          end
+        else
+          _ -> {:error, "Invalid organization, subscription, or device id."}
+        end
+    end
+  end
+
+  defp parse_operator_subscribe_id(v) when is_integer(v) and v > 0, do: {:ok, v}
+
+  defp parse_operator_subscribe_id(v) when is_binary(v) do
+    case Integer.parse(String.trim(v)) do
+      {i, _} when i > 0 -> {:ok, i}
+      _ -> {:error, :invalid_id}
+    end
+  end
+
+  defp parse_operator_subscribe_id(_), do: {:error, :invalid_id}
+
+  defp format_operator_subscribe_changeset_errors(cg) do
+    Ecto.Changeset.traverse_errors(cg, fn {msg, opts} ->
+      Enum.reduce(opts, msg, fn {key, value}, acc ->
+        String.replace(acc, "%{#{key}}", to_string(value))
+      end)
+    end)
+    |> Enum.map(fn {k, v} -> "#{k} #{inspect(v)}" end)
+    |> Enum.join("; ")
   end
 
   def update_invoice(model, params) do

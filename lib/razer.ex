@@ -51,7 +51,19 @@ defmodule Razer do
     end
   end
 
-  def payment_page(channel, amt, reference_no, merchant_id, vkey) do
+  def payment_page(
+        channel,
+        amt,
+        reference_no,
+        merchant_id,
+        vkey,
+        user \\ %{
+          fullname: "djtech",
+          phone: "0122664254",
+          username: "djtech",
+          email: "support@djtech.com"
+        }
+      ) do
     amt =
       case Application.get_env(:blog_engine, :release) do
         :prod ->
@@ -84,13 +96,6 @@ defmodule Razer do
       IO.puts(md5)
       md5
     end
-
-    user = %{
-      fullname: "djtech",
-      phone: "0122664254",
-      username: "djtech",
-      email: "support@djtech.com"
-    }
 
     "#{@endpoint}/RMS/pay/#{merchant_id}/#{channel}.php?merchant_id=#{merchant_id}&amount=#{amt}&orderid=#{reference_no}&bill_name=#{user.username}&bill_email=#{user.email}&bill_mobile=#{user.phone}&bill_desc=#{reference_no}&vcode=#{generate_signature.()}"
   end

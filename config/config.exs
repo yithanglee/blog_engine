@@ -21,10 +21,8 @@ config :blog_engine, BlogEngineWeb.Endpoint,
 config :blog_engine, BlogEngine.Repo,
   username: "postgres",
   password: "postgres",
-  database: "blog_engine_dev",
-  hostname: "localhost",
-  # database: "blog_engine_prod",
-  # hostname: "139.162.60.209",
+  database: System.get_env("DB_NAME"),
+  hostname: System.get_env("DB_HOST"),
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
 

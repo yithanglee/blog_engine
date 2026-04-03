@@ -43,6 +43,11 @@ defmodule BlogEngine.Authorization do
 end
 
 defmodule BlogEngine.ApiAuthorization do
+  @moduledoc """
+  Validates `Authorization: Basic …` on POST (except listed public scopes).
+  On success sets `conn.assigns.api_auth` to `{:member, map}` or `{:admin, username}` so
+  downstream code does not re-parse the header.
+  """
   use Phoenix.Controller, namespace: BlogEngineWeb
   import Plug.Conn
   require IEx
@@ -83,19 +88,23 @@ defmodule BlogEngine.ApiAuthorization do
                admin_t <-
                  BlogEngine.Settings.decode_admin_token(token)
                  |> IO.inspect() do
-            if t != nil do
-              conn
-            else
-              if admin_t != nil do
-                conn
-              else
-                IO.inspect("not auth")
+            conn =
+              cond do
+                t != nil ->
+                  Plug.Conn.assign(conn, :api_auth, {:member, t})
 
-                conn
-                |> resp(403, Jason.encode!(%{message: "Not authorized."}))
-                |> halt
+                admin_t != nil ->
+                  Plug.Conn.assign(conn, :api_auth, {:admin, admin_t})
+
+                true ->
+                  IO.inspect("not auth")
+
+                  conn
+                  |> resp(403, Jason.encode!(%{message: "Not authorized."}))
+                  |> halt
               end
-            end
+
+            conn
           else
             _ ->
               IO.inspect("not auth")
