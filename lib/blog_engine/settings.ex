@@ -315,6 +315,8 @@ defmodule BlogEngine.Settings do
           "pwm_config" => %{"input_pin" => d.reading_pin}
         })
 
+        Cachex.del(:device_blocked_cache, d.name)
+
       _ ->
         nil
     end

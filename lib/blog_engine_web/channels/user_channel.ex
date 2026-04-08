@@ -224,14 +224,20 @@ defmodule BlogEngineWeb.UserChannel do
   end
 
   # Add authorization logic here as required.
-  defp authorized?(payload) do
-    IO.inspect("ws auth")
+  defp authorized?(%{"user_id" => user_id} = payload) do
+    IO.inspect("ws auth for #{user_id}")
 
-    if "user_id" in Map.keys(payload) do
-      device = BlogEngine.Settings.create_update_device(payload)
-      IO.inspect(device)
-    end
+    is_blocked =
+      Cachex.fetch!(:device_blocked_cache, user_id, fn _key ->
+        device = BlogEngine.Settings.create_update_device(payload)
+        device.is_blocked
+      end, ttl: :timer.minutes(5))
 
+    !is_blocked
+  end
+
+  defp authorized?(_payload) do
+    IO.inspect("ws auth - no user_id")
     true
   end
 

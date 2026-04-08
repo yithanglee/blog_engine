@@ -26,7 +26,8 @@ defmodule BlogEngine.Application do
       {Phoenix.PubSub, name: BlogEngine.PubSub},
       # Start the Endpoint (http/https)
       BlogEngineWeb.Endpoint,
-      BlogEngine.Scheduler
+      BlogEngine.Scheduler,
+      {Cachex, name: :device_blocked_cache}
       # Start a worker by calling: BlogEngine.Worker.start_link(arg)
       # {BlogEngine.Worker, arg}
     ]

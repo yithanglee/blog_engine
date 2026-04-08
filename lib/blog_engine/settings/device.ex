@@ -29,6 +29,7 @@ defmodule BlogEngine.Settings.Device do
     belongs_to(:organization, BlogEngine.Settings.Organization)
     has_many(:outlet_subscriptions, BlogEngine.Settings.OutletSubscription)
     field(:skip_first, :boolean, default: false)
+    field(:is_blocked, :boolean, default: false)
     timestamps()
   end
 
@@ -58,7 +59,8 @@ defmodule BlogEngine.Settings.Device do
       :name,
       :short_desc,
       :is_active,
-      :is_suspended
+      :is_suspended,
+      :is_blocked
     ])
 
     # |> validate_required([:name, :short_desc, :is_active, :is_suspended])
