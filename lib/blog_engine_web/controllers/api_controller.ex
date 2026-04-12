@@ -1335,6 +1335,11 @@ defmodule BlogEngineWeb.ApiController do
           Settings.delete_all_device_log(params["device_id"])
           %{status: "ok"}
 
+        "block_device" ->
+          device = Settings.get_device!(params["device_id"])
+          Settings.update_device(device, %{is_blocked: !device.is_blocked})
+          %{status: "ok"}
+
         "set_organization_id_null" ->
           staff = Settings.get_staff!(params["id"])
           Settings.update_staff(staff, %{"organization_id" => nil})
