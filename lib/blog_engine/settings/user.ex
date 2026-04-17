@@ -16,22 +16,23 @@ defmodule BlogEngine.Settings.User do
     field(:fullname, :string)
     field(:ic_no, :string)
     field(:phone, :string)
-    field(:rank_name, :string)
+    # field(:rank_name, :string)
     field(:username, :string)
-    belongs_to(:rank, BlogEngine.Settings.Rank)
+    # field(:firebase_auth_id, :string)
+    # belongs_to(:rank, BlogEngine.Settings.Rank)
     belongs_to(:organization, BlogEngine.Settings.Organization)
-    has_one(:royalty_user, BlogEngine.Settings.RoyaltyUser)
-    field(:u2, :string, virtual: true)
-    field(:u3, :string, virtual: true)
-    has_one(:merchant, BlogEngine.Settings.Merchant)
+    # has_one(:royalty_user, BlogEngine.Settings.RoyaltyUser)
+    # field(:u2, :string, virtual: true)
+    # field(:u3, :string, virtual: true)
+    # has_one(:merchant, BlogEngine.Settings.Merchant)
     # field(:placement, :string, virtual: true)
 
-    field(:country_id, :integer)
-    field(:is_stockist, :boolean, default: false)
-    has_one(:placement, BlogEngine.Settings.Placement)
-    field(:stockist_user_id, :integer)
+    # field(:country_id, :integer)
+    # field(:is_stockist, :boolean, default: false)
+    # has_one(:placement, BlogEngine.Settings.Placement)
+    # field(:stockist_user_id, :integer)
 
-    has_many(:stockist_users, BlogEngine.Settings.User, foreign_key: :stockist_user_id)
+    # has_many(:stockist_users, BlogEngine.Settings.User, foreign_key: :stockist_user_id)
     timestamps()
   end
 
@@ -41,10 +42,6 @@ defmodule BlogEngine.Settings.User do
     |> cast(attrs, [
       :organization_id,
       :temp_pin,
-      :country_id,
-      :is_stockist,
-      :stockist_user_id,
-      :rank_id,
       :email,
       :username,
       :fullname,
@@ -53,7 +50,6 @@ defmodule BlogEngine.Settings.User do
       :crypted_password,
       :approved,
       :blocked,
-      :rank_name,
       :bank_account_holder,
       :bank_account_no,
       :bank_name

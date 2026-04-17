@@ -30,6 +30,7 @@ defmodule BlogEngine.Settings.Device do
     has_many(:outlet_subscriptions, BlogEngine.Settings.OutletSubscription)
     field(:skip_first, :boolean, default: false)
     field(:is_blocked, :boolean, default: false)
+
     timestamps()
   end
 

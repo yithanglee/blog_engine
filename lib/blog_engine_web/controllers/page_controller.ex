@@ -289,11 +289,30 @@ defmodule BlogEngineWeb.PageController do
   end
 
   @doc """
-  BlogEngineWeb.PageController.notification(Phoenix.ConnTest.build_conn(), params)
+  BlogEngineWeb.PageController.notification(Phoenix.ConnTest.build_conn(), topup_params)
   """
 
   def notification(conn, params) do
     IO.inspect(params)
+
+    topup_params = %{
+      "amount" => "1.00",
+      "appcode" => "",
+      "channel" => "RPP_DuitNowQR",
+      "currency" => "RM",
+      "domain" => "djtechplt_Dev",
+      "error_code" => "",
+      "error_desc" => "",
+      "extraP" => "{\"DbtrAgt\":\"MBBEMYKL\",\"DbtrAcct_Type\":\"SVGS\",\"TxnType\":\"DOMESTIC\",\"refundability\":\"true\",\"bank_issuer\":\"Maybank Berhad\",\"duitnowqr_indicator\":\"20260417MBBEMYKL030OQR73604100\",\"metadata\":\"[]\"}",
+      "nbcb" => "2",
+      "orderid" => "TOPUP-423",
+      "paydate" => "2026-04-17 21:55:18",
+      "skey" => "b05d9625780f818b5ab86ae40a57f7d9",
+      "status" => "00",
+      "tranID" => "3637513979"
+    }
+
+
 
     test_params = %{
       "amount" => "1.00",
@@ -356,9 +375,21 @@ defmodule BlogEngineWeb.PageController do
       BlogEngine.Settings.get_sale_by_payment_ref(tranID)
       |> IO.inspect(label: "sales_by_payment_ref")
 
+    topup_check =
+      BlogEngine.Settings.get_sale!(Map.get(params, "orderid") |> String.replace("TOPUP-", ""))
+
     cond do
       check != nil ->
         IO.inspect("already paid")
+        true
+
+      topup_check != nil ->
+        topup_sale = topup_check
+
+        if topup_sale.status == :pending_payment do
+          BlogEngine.Settings.complete_topup(topup_sale)
+        end
+
         true
 
       !String.contains?(params["orderid"], "SUBS") && check == nil && params["status"] == "00" ->
@@ -567,229 +598,6 @@ defmodule BlogEngineWeb.PageController do
       true ->
         IO.inspect("nothing match")
         true
-    end
-
-    json(conn, %{})
-  end
-
-  def _notification(conn, params) do
-    IO.inspect(params)
-
-    test_params = %{
-      "amount" => "1.00",
-      "appcode" => "",
-      "channel" => "PayNow-Offline_MP",
-      "currency" => "SGD",
-      "domain" => "djtechplt_Dev",
-      "error_code" => "",
-      "error_desc" => "",
-      "nbcb" => "1",
-      "orderid" => "441d-64cc4fbc",
-      "paydate" => "2025-01-09 22:33:09",
-      "skey" => "6158bfa4cecf2c9bd10dc26bbb5d2fd1",
-      "status" => "00",
-      "tranID" => "2628420327"
-    }
-
-    duitnow = %{
-      "amount" => "0.50",
-      "appcode" => "",
-      "channel" => "RPP_DuitNowQR-Offline_MP",
-      "currency" => "RM",
-      "domain" => "djtechplt_Dev",
-      "error_code" => "",
-      "error_desc" => "",
-      "extraP" =>
-        "{\"DbtrAgt\":\"MBBEMYKL\",\"DbtrAcct_Type\":\"SVGS\",\"TxnType\":\"DOMESTIC\",\"refundability\":\"true\",\"bank_issuer\":\"Maybank Berhad\",\"duitnowqr_indicator\":\"20240914MBBEMYKL030OQR71089433\"}",
-      "nbcb" => "2",
-      "orderid" => "441d-64cc4fbc",
-      "paydate" => "2024-09-14 07:29:12",
-      "skey" => "510f3836a7422a75a683c97b6ce171ca",
-      "status" => "00",
-      "tranID" => "2390694614"
-    }
-
-    # get the device
-    # orderid will be device's identifier
-    online = %{
-      "amount" => "2.00",
-      "appcode" => "",
-      "channel" => "maybank2u",
-      "currency" => "RM",
-      "domain" => "djtechplt_Dev",
-      "error_code" => "FPX_1C",
-      "error_desc" => "Buyer Choose Cancel At Login Page",
-      "extraP" => "{\"fpx_txn_id\":\"2409212020160488\"}",
-      "nbcb" => "2",
-      "orderid" => "TST276",
-      "paydate" => "2024-09-21 20:20:15",
-      "skey" => "7b04708f6d610d9cdeed212e2b8b4ea9",
-      "status" => "11",
-      "tranID" => "2402348820"
-    }
-
-    tranID = Map.get(params, "tranID")
-
-    check =
-      BlogEngine.Settings.get_sale_by_payment_ref(tranID)
-      |> IO.inspect(label: "sales_by_payment_ref")
-
-    if check == nil && params["status"] == "00" do
-      # probably need to check if the online trx will reach here...
-
-      device = BlogEngine.Settings.get_device_by_short_name(params["orderid"])
-
-      amt =
-        case params["amount"] |> Float.parse() do
-          {amt, _suf} ->
-            if amt < 0 do
-              1.0
-            else
-              # todo: add device round_down
-
-              if device.is_round_down do
-                amt |> Float.floor()
-              else
-                amt |> Float.round(1)
-              end
-            end
-
-          _ ->
-            1.0
-        end
-
-      {:ok, sale, device, outlet} =
-        if device == nil do
-          id =
-            params["orderid"]
-            |> String.replace(Application.get_env(:blog_engine, :revenue_monster)[:prefix], "")
-
-          sales = BlogEngine.Settings.get_sale!(id)
-          {:ok, sales, sales.device, sales.outlet}
-        else
-          # todo: add the tranID into ref then recheck for duplication
-          {:ok, sales} =
-            BlogEngine.Settings.create_sale(%{
-              uid: Ecto.UUID.generate(),
-              amount: amt,
-              outlet_id: device.outlet.id,
-              organization_id: device.organization_id,
-              device_id: device.id,
-              payment_channel: "duitnowsqr",
-              sales_date: Date.utc_today(),
-              payment_ref: tranID
-            })
-            |> IO.inspect()
-
-          outlet = device.outlet
-          {:ok, sales, device, outlet}
-        end
-
-      uuid = Ecto.UUID.generate()
-
-      device = device |> BlogEngine.Repo.preload(:executor_board)
-
-      executor_board = device.executor_board
-
-      device =
-        if executor_board != nil do
-          executor_board
-        else
-          device
-        end
-
-      # items = sale.sales_items |> IO.inspect()
-
-      amount = sale.amount
-
-      # reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
-      # item = %{reps: reps, delay: 0.5, name: "User fill #{amount}"}
-      sale = sale |> BlogEngine.Repo.preload(:sales_items)
-      items = sale.sales_items |> IO.inspect()
-
-      item =
-        if items != [] do
-          item = items |> List.first() |> Map.get(:item)
-
-          item =
-            if item == nil do
-              amount =
-                sale.sales_items
-                |> List.first()
-                |> Map.get(:item_name)
-                |> String.replace("User fill ", "")
-                |> Integer.parse()
-                |> elem(0)
-
-              reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
-
-              %{reps: reps, delay: device.default_delay, name: "User fill #{amount}"}
-            else
-              item
-            end
-        else
-          amount = sale.amount
-
-          reps = (amount / outlet.price_per_minutes) |> :erlang.trunc()
-
-          %{reps: reps, delay: device.default_delay, name: "User fill #{amount}"}
-        end
-
-      reps =
-        if device.skip_first do
-          item.reps - 1
-        else
-          item.reps
-        end
-
-      {delay, reps} =
-        if reps == 0 do
-          {0.01, 1}
-        else
-          {item.delay, reps}
-        end
-
-      format = device.format
-
-      if device.is_cloridge do
-        CloridgeAPI.send_message(reps, device.cloridge_device_uid)
-      else
-        BlogEngineWeb.ApiController.send_device_command(device.name, %{
-          "action" => "start",
-          "format" => format,
-          "reps" => reps,
-          "delay" => delay,
-          "uuid" => uuid,
-          "pin" => device.default_io_pin
-        })
-      end
-
-      job_content =
-        if device.keep_pending_task do
-          Jason.encode!(%{
-            "action" => "start",
-            "reps" => item.reps,
-            "delay" => item.delay,
-            "uuid" => uuid,
-            "pin" => device.default_io_pin
-          })
-        end
-
-      BlogEngine.Settings.create_device_log(%{
-        device_id: device.id,
-        uuid: uuid,
-        job_content: job_content,
-        remarks:
-          "sales id:#{sale.id} start #{item.name} with reps: #{item.reps} delay: #{item.delay} on pin #{device.default_io_pin}"
-      })
-      |> IO.inspect()
-
-      BlogEngine.Settings.update_sale(sale, %{
-        payment_webhook: params |> Jason.encode!(),
-        status: :complete
-      })
-      |> IO.inspect()
-    else
     end
 
     json(conn, %{})
@@ -1265,6 +1073,25 @@ defmodule BlogEngineWeb.PageController do
 
   def thank_you(conn, params) do
     IO.inspect("it's reloading!")
+    IO.inspect(params, label: "params")
+
+
+    sample =  %{
+      "amount" => "1.00",
+      "appcode" => "",
+      "channel" => "RPP_DuitNowQR",
+      "currency" => "RM",
+      "domain" => "djtechplt_Dev",
+      "error_code" => "",
+      "error_desc" => "",
+      "extraP" => "{\"DbtrAgt\":\"MBBEMYKL\",\"DbtrAcct_Type\":\"SVGS\",\"TxnType\":\"DOMESTIC\",\"refundability\":\"true\",\"bank_issuer\":\"Maybank Berhad\",\"duitnowqr_indicator\":\"20260417MBBEMYKL030OQR73027724\",\"metadata\":\"[]\"}",
+      "orderid" => "TOPUP-421",
+      "paydate" => "2026-04-17 17:35:28",
+      "skey" => "6730bd9e50787e212e7345f3f9381534",
+      "status" => "00",
+      "tranID" => "3636894200"
+    }
+
     merchant_code = Map.get(params, "MerchantCode")
 
     if merchant_code != nil do
@@ -1287,32 +1114,7 @@ defmodule BlogEngineWeb.PageController do
       "tranID" => "2065317565"
     }
 
-    if Map.get(params, "orderid") do
-      if String.contains?(params["orderid"], "SUBS") do
-        render(conn, "thank_you.html", params)
-      else
-        sale =
-          BlogEngine.Settings.get_sale!(
-            Map.get(params, "orderid")
-            |> String.replace(
-              "#{Application.get_env(:blog_engine, :revenue_monster)[:prefix]}",
-              ""
-            )
-          )
-          |> IO.inspect()
-
-        outlet = BlogEngine.Settings.get_outlet!(sale.outlet_id)
-
-        device = sale.device
-
-        conn
-        |> redirect(
-          external: "https://iot.djtech4u.com/?d=#{device.name}&location=#{outlet.subdomain}"
-        )
-      end
-    else
-      render(conn, "thank_you.html", params)
-    end
+    render(conn, "thank_you.html", params)
 
     # need to redirect back to the website..
   end

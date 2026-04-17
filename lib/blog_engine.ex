@@ -706,6 +706,13 @@ defmodule BlogEngine do
     |> IO.inspect()
   end
 
+  @doc """
+  Sign in a **member** (`BlogEngine.Settings.User`) using Firebase Authentication.
+
+  Links `firebase_auth_id` on first match by verified email. See `BlogEngine.Settings.sign_in_with_firebase/1`.
+  """
+  defdelegate sign_in_with_firebase(params), to: BlogEngine.Settings
+
   def translation() do
     data = File.read("translation.csv")
 

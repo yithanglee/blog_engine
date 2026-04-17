@@ -1,0 +1,12 @@
+<h3>
+  Hi there <%= @user.name %>
+</h3>
+
+<p>Your verification code is:</p>
+
+<p style="font-size: 24px; font-weight: 700; letter-spacing: 2px;">
+  <%= @user.pin %>
+</p>
+
+<p>This code expires in 10 minutes.</p>
+

@@ -364,15 +364,46 @@ defmodule BlogEngine.Settings do
     |> List.first()
   end
 
-  def get_cookie_user_by_cookie(cookie) do
-    Repo.all(
-      from(s in SessionUser,
-        where: s.cookie == ^cookie,
-        preload: [user: [:organization, role: :app_routes]]
-      )
-    )
-    |> List.first()
+  def get_cookie_user_by_cookie(cookie) when is_binary(cookie) and cookie != "" do
+    member_session =
+      with {:ok, %{id: id}} <-
+             Phoenix.Token.verify(BlogEngineWeb.Endpoint, "member_signature", cookie),
+           %BlogEngine.Settings.User{} = user <-
+             Repo.get(BlogEngine.Settings.User, id)
+             |> Repo.preload([:organization]) do
+        %{cookie: cookie, user: user}
+      else
+        _ -> nil
+      end
+
+    if member_session != nil do
+      member_session
+    else
+      admin_session =
+        with {:ok, username} <-
+               Phoenix.Token.verify(BlogEngineWeb.Endpoint, "admin_signature", cookie),
+             true <- is_binary(username),
+             staff when not is_nil(staff) <- get_staff_by_username(username) do
+          staff = Repo.preload(staff, [:organization, role: :app_routes])
+          %{cookie: cookie, user: staff}
+        else
+          _ -> nil
+        end
+
+      if admin_session != nil do
+        admin_session
+      else
+        Repo.one(
+          from(s in SessionUser,
+            where: s.cookie == ^cookie,
+            preload: [user: [:organization, role: :app_routes]]
+          )
+        )
+      end
+    end
   end
+
+  def get_cookie_user_by_cookie(_), do: nil
 
   def list_session_users() do
     Repo.all(SessionUser)
@@ -588,7 +619,7 @@ defmodule BlogEngine.Settings do
            :crypto.hash(:sha512, params["password"]) |> Base.encode16() |> String.downcase(),
          true <- crypted_password == user.temp_pin do
       {:ok, user} = User.changeset(user, %{temp_pin: nil}) |> Repo.update()
-      user = user |> Repo.preload([:merchant, :rank, :stockist_users])
+      user = user |> Repo.preload([:organization])
       {:ok, user}
     else
       _ ->
@@ -597,24 +628,40 @@ defmodule BlogEngine.Settings do
   end
 
   def auth_user(params) do
-    res =
-      Repo.all(
-        from(u in User,
-          where: u.username == ^params["username"],
-          preload: [:merchant, :rank, :stockist_users]
-        )
-      )
+    login =
+      params
+      |> Map.get("username", "")
+      |> to_string()
+      |> String.trim()
 
-    user = res |> List.first()
+    password = Map.get(params, "password")
 
-    with true <- user != nil,
+    user =
+      cond do
+        login == "" ->
+          nil
+
+        String.contains?(login, "@") ->
+          get_user_by_email(login)
+
+        true ->
+          Repo.one(
+            from(u in User,
+              where: u.username == ^login,
+              preload: [:organization]
+            )
+          )
+      end
+
+    with %User{} = user <- user,
+         true <- is_binary(password),
          crypted_password <-
-           :crypto.hash(:sha512, params["password"]) |> Base.encode16() |> String.downcase(),
+           :crypto.hash(:sha512, password) |> Base.encode16() |> String.downcase(),
          true <- crypted_password == user.crypted_password do
       {:ok, user}
     else
       _ ->
-        {:error, res}
+        {:error, nil}
     end
   end
 
@@ -623,21 +670,105 @@ defmodule BlogEngine.Settings do
   end
 
   def get_user!(id) do
-    Repo.all(from(u in User, where: u.id == ^id, preload: [:rank, :merchant])) |> List.first()
+    Repo.all(from(u in User, where: u.id == ^id, preload: [:organization])) |> List.first()
   end
 
   def create_user(attrs \\ %{}) do
     attrs =
-      if "password" in Map.keys(attrs) do
-        crypted_password =
-          :crypto.hash(:sha512, attrs["password"]) |> Base.encode16() |> String.downcase()
+      cond do
+        Map.has_key?(attrs, "password") and is_binary(attrs["password"]) and
+            String.trim(attrs["password"]) != "" ->
+          crypted_password =
+            :crypto.hash(:sha512, attrs["password"]) |> Base.encode16() |> String.downcase()
 
-        attrs |> Map.put("crypted_password", crypted_password)
-      else
-        attrs
+          attrs |> Map.put("crypted_password", crypted_password) |> Map.delete("password")
+
+        true ->
+          attrs
       end
 
     User.changeset(%User{}, attrs) |> Repo.insert() |> IO.inspect()
+  end
+
+  @doc """
+  After a correct email PIN, creates or updates a `users` row when `send_email_pin` stored
+  `:crypted_password` / `:register_name` in the pin agent (password was supplied at registration).
+
+  Returns `{:ok, :created | :updated | :skipped}` or `{:error, reason | Ecto.Changeset}`.
+  """
+  def register_verified_member_from_pin(normalized_email, stored) when is_map(stored) do
+    hash = Map.get(stored, :crypted_password)
+    reg_name = Map.get(stored, :register_name)
+    org_id = Map.get(stored, :organization_id)
+
+    if !is_binary(hash) or (is_binary(hash) and String.trim(hash) == "") do
+      {:ok, :skipped}
+    else
+      fullname =
+        if is_binary(reg_name) and String.trim(reg_name) != "" do
+          String.trim(reg_name)
+        else
+          normalized_email
+        end
+
+      case get_user_by_email(normalized_email) do
+        nil ->
+          username = unique_member_username(normalized_email)
+
+          attrs =
+            %{
+              "username" => username,
+              "email" => normalized_email,
+              "fullname" => fullname,
+              "crypted_password" => hash
+            }
+            |> then(fn a ->
+              if is_integer(org_id), do: Map.put(a, "organization_id", org_id), else: a
+            end)
+
+          case create_user(attrs) do
+            {:ok, _} -> {:ok, :created}
+            {:error, cs} -> {:error, cs}
+          end
+
+        %User{} = u ->
+          if u.crypted_password in [nil, ""] do
+            update_attrs =
+              %{crypted_password: hash, fullname: fullname}
+              |> then(fn a ->
+                if is_integer(org_id) and u.organization_id in [nil, 0],
+                  do: Map.put(a, :organization_id, org_id),
+                  else: a
+              end)
+
+            case User.changeset(u, update_attrs)
+                 |> Repo.update() do
+              {:ok, _} -> {:ok, :updated}
+              {:error, cs} -> {:error, cs}
+            end
+          else
+            {:error, :already_registered}
+          end
+      end
+    end
+  end
+
+  defp unique_member_username(email) when is_binary(email) do
+    local =
+      email
+      |> String.split("@")
+      |> List.first()
+      |> to_string()
+      |> String.replace(~r/[^a-zA-Z0-9_]/, "_")
+      |> String.slice(0, 32)
+
+    base = if local == "", do: "user", else: local
+
+    if get_user_by_username(base) == nil do
+      base
+    else
+      "#{base}_#{:rand.uniform(999_999)}"
+    end
   end
 
   def update_user(model, attrs) do
@@ -684,6 +815,189 @@ defmodule BlogEngine.Settings do
 
   def get_user_by_username(username) do
     Repo.get_by(User, username: username)
+  end
+
+  @doc """
+  Looks up a member `User` by Firebase Authentication UID (stored in `firebase_auth_id`).
+  """
+  def get_user_by_firebase_auth_id(firebase_auth_id) when is_binary(firebase_auth_id) do
+    Repo.one(
+      from(u in User,
+        where: u.firebase_auth_id == ^firebase_auth_id,
+        preload: [:organization]
+      )
+    )
+  end
+
+  def get_user_by_firebase_auth_id(_), do: nil
+
+  @doc """
+  Case-insensitive email lookup for member `User` (not `Staff`).
+  """
+  def get_user_by_email(email) when is_binary(email) do
+    e = String.trim(email)
+
+    if e == "" do
+      nil
+    else
+      Repo.one(
+        from(u in User,
+          where: fragment("LOWER(?) = LOWER(?)", u.email, ^e)
+        )
+      )
+    end
+  end
+
+  def get_user_by_email(_), do: nil
+
+  @doc """
+  Sign in a member via Firebase Auth (email/password with verified email, or Google, etc.).
+
+  Expects a map with string keys, e.g. `%{"uid" => ..., "email" => ..., "email_verified" => true}`.
+  Links `firebase_auth_id` on first successful match by email.
+
+  Returns `{:ok, %{user: user_map, token: cookie_token}}` or `{:error, reason}`.
+  """
+  def sign_in_with_firebase(attrs) when is_map(attrs) do
+    attrs = for {k, v} <- attrs, into: %{}, do: {to_string(k), v}
+
+    uid = attrs["uid"]
+
+    cond do
+      not is_binary(uid) or String.trim(uid) == "" ->
+        {:error, :invalid_firebase_uid}
+
+      true ->
+        email = attrs["email"] |> normalize_firebase_email()
+        email_verified = firebase_email_verified?(attrs, email)
+
+        cond do
+          is_binary(email) and email != "" and email_verified == false ->
+            {:error, :email_not_verified}
+
+          true ->
+            resolve_user_and_issue_token(uid, attrs, email)
+        end
+    end
+  end
+
+  defp normalize_firebase_email(nil), do: nil
+
+  defp normalize_firebase_email(email) when is_binary(email) do
+    case String.trim(email) do
+      "" -> nil
+      e -> e
+    end
+  end
+
+  defp normalize_firebase_email(_), do: nil
+
+  defp firebase_email_verified?(attrs, email) do
+    v = Map.get(attrs, "email_verified") || Map.get(attrs, "emailVerified")
+
+    cond do
+      is_boolean(v) ->
+        v
+
+      v in ["true", "1", 1] ->
+        true
+
+      v in ["false", "0", 0] ->
+        false
+
+      email in [nil, ""] ->
+        true
+
+      true ->
+        # Flag omitted (common when wrapping Firebase `User`); treat as verified if email present
+        true
+    end
+  end
+
+  defp resolve_user_and_issue_token(uid, attrs, email) do
+    user =
+      case get_user_by_firebase_auth_id(uid) do
+        %User{} = u ->
+          {:ok, u}
+
+        nil ->
+          case email do
+            nil ->
+              {:needs_link, nil}
+
+            e ->
+              case get_user_by_email(e) do
+                %User{} = u -> {:needs_link, u}
+                nil -> {:missing, nil}
+              end
+          end
+      end
+
+    case user do
+      {:ok, u} ->
+        u = maybe_update_profile_from_firebase(u, attrs)
+        issue_member_session(u)
+
+      {:needs_link, %User{} = u} ->
+        case User.changeset(u, %{firebase_auth_id: uid}) |> Repo.update() do
+          {:ok, u} ->
+            u = u |> Repo.preload([:organization])
+            u = maybe_update_profile_from_firebase(u, attrs)
+            issue_member_session(u)
+
+          {:error, changeset} ->
+            {:error, {:could_not_link_firebase, changeset}}
+        end
+
+      {:needs_link, nil} ->
+        {:error, :firebase_user_needs_email}
+
+      {:missing, nil} ->
+        {:error, :no_account_for_firebase}
+    end
+  end
+
+  defp maybe_update_profile_from_firebase(%User{} = u, attrs) do
+    name = attrs["name"] || attrs["displayName"]
+    updates = %{}
+
+    updates =
+      if is_binary(name) and String.trim(name) != "" and (is_nil(u.fullname) or u.fullname == "") do
+        Map.put(updates, :fullname, String.trim(name))
+      else
+        updates
+      end
+
+    em = normalize_firebase_email(attrs["email"] || Map.get(attrs, "email"))
+
+    updates =
+      if is_binary(em) and em != "" and (is_nil(u.email) or u.email == "") do
+        Map.put(updates, :email, em)
+      else
+        updates
+      end
+
+    if map_size(updates) > 0 do
+      case User.changeset(u, updates) |> Repo.update() do
+        {:ok, u} -> u |> Repo.preload([:organization])
+        {:error, _} -> u
+      end
+    else
+      u
+    end
+  end
+
+  defp issue_member_session(%User{} = user) do
+    user = Repo.preload(user, [:merchant, :rank, :stockist_users])
+    token = member_token(user.id)
+    create_session_user(%{"cookie" => token, "user_id" => user.id})
+
+    u =
+      user
+      |> BluePotion.sanitize_struct()
+      |> Map.put(:token, token)
+
+    {:ok, %{user: u, token: token}}
   end
 
   def get_staff_by_username(username) when is_binary(username) do
@@ -1812,6 +2126,354 @@ defmodule BlogEngine.Settings do
     Repo.delete(model)
   end
 
+  @doc """
+  Operator app: devices for an organization with last ping, online flag (recent device_time_logs),
+  and today's sales totals split by cash vs QR-style payments (`sales_type` / `payment_channel`).
+  """
+  def operator_devices_summary(params) when is_map(params) do
+    org_id =
+      case Map.get(params, "organization_id") do
+        nil ->
+          nil
+
+        v when is_binary(v) ->
+          case Integer.parse(v) do
+            {i, _} -> i
+            :error -> nil
+          end
+
+        v when is_integer(v) ->
+          v
+      end
+
+    outlet_id =
+      case Map.get(params, "outlet_id") do
+        nil ->
+          nil
+
+        "" ->
+          nil
+
+        v when is_binary(v) ->
+          case Integer.parse(v) do
+            {i, _} -> i
+            :error -> nil
+          end
+
+        v when is_integer(v) ->
+          v
+      end
+
+    if org_id == nil do
+      []
+    else
+      outlet_filter =
+        if outlet_id do
+          " AND d.outlet_id = $2 "
+        else
+          ""
+        end
+
+      bind = if outlet_id, do: [org_id, outlet_id], else: [org_id]
+
+      query = """
+      SELECT
+        d.id,
+        d.name,
+        d.label,
+        d.short_name,
+        o.name AS outlet_name,
+        (
+          SELECT MAX(dtl.inserted_at)
+          FROM device_time_logs dtl
+          WHERE dtl.device_id = d.id
+        ) AS last_seen_at,
+        COALESCE(ts.today_total, 0) AS today_sales_total,
+        COALESCE(ts.today_cash, 0) AS today_sales_cash,
+        COALESCE(ts.today_qr, 0) AS today_sales_qr
+      FROM devices d
+      LEFT JOIN outlets o ON o.id = d.outlet_id
+      LEFT JOIN LATERAL (
+        SELECT
+          SUM(s.amount) AS today_total,
+          SUM(s.amount) FILTER (WHERE COALESCE(s.sales_type, '') = 'cash') AS today_cash,
+          SUM(s.amount) FILTER (
+            WHERE COALESCE(s.sales_type, '') = 'offline'
+              OR (s.payment_channel IS NOT NULL AND (
+                s.payment_channel ILIKE '%qr%'
+                OR s.payment_channel ILIKE '%duitnow%'
+                OR s.payment_channel = 'duitnowsqr'
+              ))
+          ) AS today_qr
+        FROM sales s
+        WHERE s.device_id = d.id
+          AND s.status = 'complete'
+          AND DATE((s.inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kuala_Lumpur')
+            = DATE(timezone('Asia/Kuala_Lumpur', now()))
+      ) ts ON true
+      WHERE d.organization_id = $1
+      #{outlet_filter}
+      ORDER BY o.name NULLS LAST, d.label NULLS LAST, d.short_name NULLS LAST, d.name
+      """
+
+      {:ok, %Postgrex.Result{columns: columns, rows: rows}} = Repo.query(query, bind)
+
+      Enum.map(rows, fn row ->
+        map = Enum.zip(columns |> Enum.map(&String.to_atom/1), row) |> Enum.into(%{})
+
+        last_seen = Map.get(map, :last_seen_at)
+
+        is_online =
+          case last_seen do
+            %NaiveDateTime{} = ndt ->
+              dt = DateTime.from_naive!(NaiveDateTime.truncate(ndt, :second), "Etc/UTC")
+
+              DateTime.diff(DateTime.utc_now(), dt, :second) >= 0 &&
+                DateTime.diff(DateTime.utc_now(), dt, :second) <= 180
+
+            %DateTime{} = dt ->
+              DateTime.diff(DateTime.utc_now(), dt, :second) >= 0 &&
+                DateTime.diff(DateTime.utc_now(), dt, :second) <= 180
+
+            _ ->
+              false
+          end
+
+        map
+        |> Map.put(:is_online, is_online)
+        |> Map.update!(:today_sales_total, &decimal_to_float/1)
+        |> Map.update!(:today_sales_cash, &decimal_to_float/1)
+        |> Map.update!(:today_sales_qr, &decimal_to_float/1)
+      end)
+    end
+  end
+
+  defp decimal_to_float(%Decimal{} = d), do: Decimal.to_float(d)
+  defp decimal_to_float(n) when is_number(n), do: n * 1.0
+  defp decimal_to_float(_), do: 0.0
+
+  @doc """
+  Per-device stats for operator detail: today's sales (total / cash / QR), jobs today, hourly buckets.
+  """
+  def operator_device_stats(params) when is_map(params) do
+    device_id =
+      case Map.get(params, "device_id") do
+        nil ->
+          nil
+
+        v when is_binary(v) ->
+          case Integer.parse(v) do
+            {i, _} -> i
+            :error -> nil
+          end
+
+        v when is_integer(v) ->
+          v
+      end
+
+    if device_id == nil do
+      %{error: "device_id required"}
+    else
+      sales_q = """
+      SELECT
+        COALESCE(SUM(s.amount), 0) AS today_total,
+        COALESCE(SUM(s.amount) FILTER (WHERE COALESCE(s.sales_type, '') = 'cash'), 0) AS today_cash,
+        COALESCE(
+          SUM(s.amount) FILTER (
+            WHERE COALESCE(s.sales_type, '') = 'offline'
+              OR (s.payment_channel IS NOT NULL AND (
+                s.payment_channel ILIKE '%qr%'
+                OR s.payment_channel ILIKE '%duitnow%'
+                OR s.payment_channel = 'duitnowsqr'
+              ))
+          ),
+          0
+        ) AS today_qr
+      FROM sales s
+      WHERE s.device_id = $1
+        AND s.status = 'complete'
+        AND DATE((s.inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kuala_Lumpur')
+          = DATE(timezone('Asia/Kuala_Lumpur', now()))
+      """
+
+      {:ok, %Postgrex.Result{rows: [sales_row]}} = Repo.query(sales_q, [device_id])
+
+      jobs_q = """
+      SELECT COUNT(*)::bigint
+      FROM device_logs dl
+      WHERE dl.device_id = $1
+        AND DATE((dl.inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kuala_Lumpur')
+          = DATE(timezone('Asia/Kuala_Lumpur', now()))
+      """
+
+      {:ok, %Postgrex.Result{rows: [[jobs_today]]}} = Repo.query(jobs_q, [device_id])
+
+      hourly_q = """
+      SELECT
+        EXTRACT(HOUR FROM (s.inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kuala_Lumpur')::integer AS hr,
+        COALESCE(SUM(s.amount), 0) AS total,
+        COALESCE(SUM(s.amount) FILTER (WHERE COALESCE(s.sales_type, '') = 'cash'), 0) AS cash,
+        COALESCE(
+          SUM(s.amount) FILTER (
+            WHERE COALESCE(s.sales_type, '') = 'offline'
+              OR (s.payment_channel IS NOT NULL AND (
+                s.payment_channel ILIKE '%qr%'
+                OR s.payment_channel ILIKE '%duitnow%'
+                OR s.payment_channel = 'duitnowsqr'
+              ))
+          ),
+          0
+        ) AS qr
+      FROM sales s
+      WHERE s.device_id = $1
+        AND s.status = 'complete'
+        AND DATE((s.inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kuala_Lumpur')
+          = DATE(timezone('Asia/Kuala_Lumpur', now()))
+      GROUP BY 1
+      ORDER BY 1
+      """
+
+      {:ok, %Postgrex.Result{rows: hourly_rows}} = Repo.query(hourly_q, [device_id])
+
+      hourly_map =
+        hourly_rows
+        |> Enum.map(fn [hr, total, cash, qr] ->
+          h = hr |> :erlang.trunc()
+
+          {h,
+           %{
+             hour: h,
+             total: decimal_to_float(total),
+             cash: decimal_to_float(cash),
+             qr: decimal_to_float(qr)
+           }}
+        end)
+        |> Map.new()
+
+      hourly =
+        Enum.map(0..23, fn h ->
+          Map.get(hourly_map, h, %{hour: h, total: 0.0, cash: 0.0, qr: 0.0})
+        end)
+
+      [t_total, t_cash, t_qr] = sales_row
+
+      %{
+        today_sales_total: decimal_to_float(t_total),
+        today_sales_cash: decimal_to_float(t_cash),
+        today_sales_qr: decimal_to_float(t_qr),
+        jobs_today: jobs_today || 0,
+        sales_today_by_hour: hourly
+      }
+    end
+  end
+
+  @doc """
+  Organization-wide hourly sales for today (Asia/Kuala_Lumpur), optional `device_id` filter.
+  """
+  def organization_sales_today_by_hour(params) when is_map(params) do
+    org_id =
+      case Map.get(params, "organization_id") do
+        nil ->
+          nil
+
+        v when is_binary(v) ->
+          case Integer.parse(v) do
+            {i, _} -> i
+            :error -> nil
+          end
+
+        v when is_integer(v) ->
+          v
+      end
+
+    if org_id == nil do
+      []
+    else
+      device_id =
+        case Map.get(params, "device_id") do
+          nil ->
+            nil
+
+          "" ->
+            nil
+
+          "all" ->
+            nil
+
+          v when is_binary(v) ->
+            case Integer.parse(v) do
+              {i, _} -> i
+              :error -> nil
+            end
+
+          v when is_integer(v) ->
+            v
+        end
+
+      {extra_sql, bind} =
+        if device_id do
+          {" AND s.device_id = $2", [org_id, device_id]}
+        else
+          {"", [org_id]}
+        end
+
+      query = """
+      SELECT
+        EXTRACT(HOUR FROM (s.inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kuala_Lumpur')::integer AS hr,
+        COALESCE(SUM(s.amount), 0) AS total,
+        COALESCE(SUM(s.amount) FILTER (WHERE COALESCE(s.sales_type, '') = 'cash'), 0) AS cash,
+        COALESCE(
+          SUM(s.amount) FILTER (
+            WHERE COALESCE(s.sales_type, '') = 'offline'
+              OR (s.payment_channel IS NOT NULL AND (
+                s.payment_channel ILIKE '%qr%'
+                OR s.payment_channel ILIKE '%duitnow%'
+                OR s.payment_channel = 'duitnowsqr'
+              ))
+          ),
+          0
+        ) AS qr
+      FROM sales s
+      INNER JOIN devices d ON d.id = s.device_id
+      WHERE d.organization_id = $1
+        AND s.status = 'complete'
+        AND DATE((s.inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kuala_Lumpur')
+          = DATE(timezone('Asia/Kuala_Lumpur', now()))
+      #{extra_sql}
+      GROUP BY 1
+      ORDER BY 1
+      """
+
+      {:ok, %Postgrex.Result{rows: hourly_rows}} = Repo.query(query, bind)
+
+      hourly_map =
+        hourly_rows
+        |> Enum.map(fn [hr, total, cash, qr] ->
+          h = hr |> :erlang.trunc()
+
+          {h,
+           %{
+             hour: h,
+             label: "#{String.pad_leading(Integer.to_string(h), 2, "0")}:00",
+             total: decimal_to_float(total),
+             cash: decimal_to_float(cash),
+             qr: decimal_to_float(qr)
+           }}
+        end)
+        |> Map.new()
+
+      Enum.map(0..23, fn h ->
+        Map.get(hourly_map, h, %{
+          hour: h,
+          label: "#{String.pad_leading(Integer.to_string(h), 2, "0")}:00",
+          total: 0.0,
+          cash: 0.0,
+          qr: 0.0
+        })
+      end)
+    end
+  end
+
   # BlogEngine.Settings.monthly_outlet_trx_only_days()
 
   def monthly_outlet_trx_only_days(params \\ %{}) do
@@ -2361,7 +3023,8 @@ defmodule BlogEngine.Settings do
           "subscription_id" => sub_id
         })
       end)
-      |> Repo.transaction() |> IO.inspect(label: "Repo.transaction")
+      |> Repo.transaction()
+      |> IO.inspect(label: "Repo.transaction")
       |> case do
         {:ok, %{invoice: inv, outlet_subscription: os}} ->
           {:ok, %{invoice: inv, outlet_subscription: os}}
@@ -2398,7 +3061,8 @@ defmodule BlogEngine.Settings do
                    "organization_id" => org_id,
                    "subscription_id" => sub_id,
                    "device_id" => device_id
-                 }) |> IO.inspect(label: "create_invoice_for_subscription_plan") do
+                 })
+                 |> IO.inspect(label: "create_invoice_for_subscription_plan") do
               {:ok, %{invoice: inv, outlet_subscription: outlet_subscription}} ->
                 {:ok, %{status: "ok", invoice_id: inv.id, ref_no: inv.ref_no}}
 
@@ -2444,6 +3108,191 @@ defmodule BlogEngine.Settings do
   end
 
   def delete_invoice(%Invoice{} = model) do
+    Repo.delete(model)
+  end
+
+  alias BlogEngine.Settings.UserTopup
+
+  def list_user_topups() do
+    Repo.all(UserTopup)
+  end
+
+  def get_user_topup!(id) do
+    Repo.get!(UserTopup, id)
+  end
+
+  def get_user_topup_by_user_and_organization(user_id, organization_id)
+      when is_integer(user_id) and is_integer(organization_id) do
+    Repo.get_by(UserTopup, user_id: user_id, organization_id: organization_id)
+  end
+
+  def get_user_topup_by_user_and_organization(_, _), do: nil
+
+  def create_user_topup(params \\ %{}) do
+    UserTopup.changeset(%UserTopup{}, params) |> Repo.insert() |> IO.inspect()
+  end
+
+  def update_user_topup(model, params) do
+    UserTopup.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_user_topup(%UserTopup{} = model) do
+    Repo.delete(model)
+  end
+
+  def complete_topup(topup_sale) do
+    Multi.new()
+    |> Multi.run(:user_topup_multi, fn _repo, %{} ->
+      multi_res =
+        BlogEngine.Settings.create_user_topup_transaction(%{
+          user_id: Map.get(topup_sale, :user_id),
+          organization_id: topup_sale.organization_id,
+          amount: topup_sale.amount,
+          remarks: "Topup payment",
+          sales_id: topup_sale.id,
+          device_log_id: nil
+        })
+
+      multi_res
+    end)
+    |> Multi.run(:sale_update, fn _repo, _changes ->
+      BlogEngine.Settings.update_sale(topup_sale, %{status: :complete})
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, multi_res} ->
+        {:ok, multi_res}
+
+      {:error, _step, failed_val, _changes} ->
+        {:error, failed_val}
+
+      other ->
+        {:error, other}
+    end
+  end
+
+  alias BlogEngine.Settings.UserTopupTransaction
+
+  @doc """
+  Latest ledger rows for a member within one organization (via `user_topups`).
+  """
+  def list_recent_user_topup_transactions(user_id, organization_id, limit \\ 5)
+      when is_integer(user_id) and is_integer(organization_id) and is_integer(limit) do
+    from(t in UserTopupTransaction,
+      join: ut in UserTopup,
+      on: t.user_topup_id == ut.id,
+      where: ut.user_id == ^user_id and ut.organization_id == ^organization_id,
+      order_by: [desc: t.inserted_at],
+      limit: ^limit,
+      select: t
+    )
+    |> Repo.all()
+  end
+
+  def list_user_topup_transactions() do
+    Repo.all(UserTopupTransaction)
+  end
+
+  def get_user_topup_transaction!(id) do
+    Repo.get!(UserTopupTransaction, id)
+  end
+
+  def create_user_topup_transaction(params \\ %{}) do
+    params = normalize_user_topup_transaction_params(params)
+
+    Multi.new()
+    |> Multi.run(:user_topup, fn _repo, %{} ->
+      user_id = Map.fetch!(params, :user_id)
+      organization_id = Map.fetch!(params, :organization_id)
+
+      case Repo.get_by(UserTopup, user_id: user_id, organization_id: organization_id) do
+        %UserTopup{} = ut ->
+          {:ok, ut}
+
+        nil ->
+          case create_user_topup(%{
+                 user_id: user_id,
+                 organization_id: organization_id,
+                 balance: 0.0
+               }) do
+            {:ok, %UserTopup{} = ut} -> {:ok, ut}
+            {:error, cg} -> {:error, cg}
+          end
+      end
+    end)
+    |> Multi.run(:user_topup_transaction, fn _repo, %{user_topup: %UserTopup{} = ut} ->
+      amount = Map.fetch!(params, :amount) |> to_float_2dp()
+      before_amt = (ut.balance || 0.0) |> to_float_2dp()
+      after_amt = (before_amt + amount) |> to_float_2dp()
+
+      attrs =
+        params
+        |> Map.put(:user_topup_id, ut.id)
+        |> Map.put(:before_amt, before_amt)
+        |> Map.put(:after_amt, after_amt)
+
+      UserTopupTransaction.changeset(%UserTopupTransaction{}, attrs) |> Repo.insert()
+    end)
+    |> Multi.run(:user_topup_update, fn _repo,
+                                        %{
+                                          user_topup: %UserTopup{} = ut,
+                                          user_topup_transaction: %UserTopupTransaction{} = trx
+                                        } ->
+      UserTopup.changeset(ut, %{balance: trx.after_amt}) |> Repo.update()
+    end)
+    |> Repo.transaction()
+    |> IO.inspect()
+    |> case do
+      {:ok, multi_res} ->
+        {:ok, multi_res |> Map.get(:user_topup_transaction)}
+
+      {:error, _step, failed_val, _changes} ->
+        {:error, failed_val}
+
+      other ->
+        {:error, other}
+    end
+  end
+
+  defp normalize_user_topup_transaction_params(params) when is_map(params) do
+    params =
+      cond do
+        Map.has_key?(params, :user_id) ->
+          params
+
+        true ->
+          for {k, v} <- params, into: %{}, do: {to_string(k), v}
+      end
+
+    %{
+      user_id: params[:user_id] || params["user_id"],
+      organization_id: params[:organization_id] || params["organization_id"],
+      amount: params[:amount] || params["amount"],
+      remarks: params[:remarks] || params["remarks"],
+      sales_id: params[:sales_id] || params["sales_id"],
+      device_log_id: params[:device_log_id] || params["device_log_id"]
+    }
+  end
+
+  defp normalize_user_topup_transaction_params(_), do: %{}
+
+  defp to_float_2dp(v) when is_float(v), do: Float.round(v, 2)
+  defp to_float_2dp(v) when is_integer(v), do: (v * 1.0) |> Float.round(2)
+
+  defp to_float_2dp(v) when is_binary(v) do
+    case Float.parse(String.trim(v)) do
+      {f, _} -> Float.round(f, 2)
+      _ -> 0.0
+    end
+  end
+
+  defp to_float_2dp(_), do: 0.0
+
+  def update_user_topup_transaction(model, params) do
+    UserTopupTransaction.changeset(model, params) |> Repo.update() |> IO.inspect()
+  end
+
+  def delete_user_topup_transaction(%UserTopupTransaction{} = model) do
     Repo.delete(model)
   end
 

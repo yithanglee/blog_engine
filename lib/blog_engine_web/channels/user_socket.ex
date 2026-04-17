@@ -4,6 +4,7 @@ defmodule BlogEngineWeb.UserSocket do
   ## Channels
   # channel "room:*", BlogEngineWeb.RoomChannel
   channel "user:*", BlogEngineWeb.UserChannel
+  channel "organization:*", BlogEngineWeb.OrganizationChannel
   # Socket params are passed from the client and can
   # be used to verify and authenticate a user. After
   # verification, you can put default assigns into

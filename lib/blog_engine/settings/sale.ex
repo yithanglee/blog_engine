@@ -2,7 +2,6 @@ defmodule BlogEngine.Settings.Sale do
   use Ecto.Schema
   import Ecto.Changeset
   import EctoEnum
-
   defenum(
     StatusEnum,
     ~w(
@@ -19,14 +18,23 @@ defmodule BlogEngine.Settings.Sale do
       cancelled
     )
   )
+  defenum(
+    SalesEnum,
+    ~w(
+     offline
+     online
+     topup
+    )
+  )
 
   schema "sales" do
     field(:uid, :string)
     field(:amount, :float)
+    belongs_to(:user, BlogEngine.Settings.User)
     belongs_to(:outlet, BlogEngine.Settings.Outlet)
     # field(:outlet_id, :integer)
     # field(:device_id, :integer)
-    field(:sales_type, :string, default: "offline")
+    field(:sales_type, SalesEnum, default: :offline)
     belongs_to(:device, BlogEngine.Settings.Device)
 
     has_many(:sales_items, BlogEngine.Settings.SalesItem, foreign_key: :sales_id)
@@ -50,6 +58,7 @@ defmodule BlogEngine.Settings.Sale do
       :organization_id,
       :payment_url,
       :uid,
+      :user_id,
       :outlet_id,
       :device_id,
       :amount,

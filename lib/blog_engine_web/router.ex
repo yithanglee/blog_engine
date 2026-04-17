@@ -143,6 +143,9 @@ defmodule BlogEngineWeb.Router do
 
     get "/webhook", ApiController, :get
     post "/webhook", ApiController, :post
+    options "/user_profile", ApiController, :options_ok
+    get "/user_profile", ApiController, :get_user_profile
+    post "/user_profile", ApiController, :update_user_profile
     options("/:model", ApiController, :datatable)
     get("/:model", ApiController, :datatable)
     post("/:model", ApiController, :form_submission)

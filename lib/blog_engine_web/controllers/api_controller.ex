@@ -164,6 +164,29 @@ defmodule BlogEngineWeb.ApiController do
 
     res =
       case params["scope"] do
+        "get_user_topup_balance" ->
+          org_id =
+            case Map.get(params, "organization_id") do
+              v when is_integer(v) -> v
+              v when is_binary(v) ->
+                case Integer.parse(String.trim(v)) do
+                  {i, _} -> i
+                  _ -> 0
+                end
+
+              _ ->
+                0
+            end
+
+          ut = Settings.get_user_topup_by_user_and_organization(id, org_id)
+          bal =
+            case ut do
+              nil -> 0.0
+              _ -> Map.get(ut, :balance) || 0.0
+            end
+
+          %{status: "ok", balance: bal}
+
         "model_get_by" ->
           map =
             params
@@ -270,12 +293,13 @@ defmodule BlogEngineWeb.ApiController do
             # return url to make payment
             case outlet_item.outlet.payment_gateway do
               "fiuu" ->
-                nil
                 chan = "FPX"
                 server_url = Application.get_env(:blog_engine, :url)
+                ref_no = "#{Application.get_env(:blog_engine, :revenue_monster)[:prefix]}#{s.id}"
 
-                payment_url =
-                  "#{server_url}/test_razer?chan=#{chan}&amt=#{(outlet_item.price * 1) |> :erlang.float_to_binary(decimals: 2)}&ref_no=#{Application.get_env(:blog_engine, :revenue_monster)[:prefix]}#{s.id}"
+                amt = (outlet_item.price * 1) |> :erlang.float_to_binary(decimals: 2)
+
+                "#{server_url}/test_razer?chan=#{chan}&amt=#{amt}&ref_no=#{ref_no}"
 
               "ipay88" ->
                 # Ipay88.send_payment_request(
@@ -327,6 +351,15 @@ defmodule BlogEngineWeb.ApiController do
             _ ->
               nil
           end
+
+        "operator_devices_summary" ->
+          Settings.operator_devices_summary(params)
+
+        "operator_device_stats" ->
+          Settings.operator_device_stats(params)
+
+        "organization_sales_today_by_hour" ->
+          Settings.organization_sales_today_by_hour(params)
 
         "current_month_outlet_trx_only_days" ->
           Settings.monthly_outlet_trx_only_days(params)
@@ -502,7 +535,13 @@ defmodule BlogEngineWeb.ApiController do
           Settings.get_role!(params["id"]) |> BluePotion.sanitize_struct()
 
         "get_cookie_user" ->
-          Settings.get_cookie_user_by_cookie(params["cookie"]) |> BluePotion.sanitize_struct()
+          case Settings.get_cookie_user_by_cookie(params["cookie"]) do
+            %{cookie: c, user: u} ->
+              %{cookie: c, user: u |> BluePotion.sanitize_struct()}
+
+            other ->
+              other |> BluePotion.sanitize_struct()
+          end
 
         "announcements" ->
           Settings.list_announcements() |> Enum.map(&(&1 |> BluePotion.sanitize_struct()))
@@ -1302,9 +1341,110 @@ defmodule BlogEngineWeb.ApiController do
     end
   end
 
+  # Member `users` table — same credential check as legacy `"login"` scope (kept for older clients).
+  defp parse_refund_user_id(v) when is_integer(v) and v > 0, do: v
+
+  defp parse_refund_user_id(v) when is_binary(v) do
+    case Integer.parse(String.trim(v)) do
+      {i, _} when i > 0 -> i
+      _ -> nil
+    end
+  end
+
+  defp parse_refund_user_id(_), do: nil
+
+  defp parse_refund_amount(v) when is_integer(v), do: v * 1.0
+
+  defp parse_refund_amount(v) when is_float(v), do: v
+
+  defp parse_refund_amount(v) when is_binary(v) do
+    case Float.parse(String.trim(v)) do
+      {f, _} -> f
+      _ -> nil
+    end
+  end
+
+  defp parse_refund_amount(_), do: nil
+
+  defp member_password_login_response(params) do
+    auth = Settings.auth_user(params["user"] || %{}) |> IO.inspect()
+
+    case auth do
+      {:ok, user} ->
+        token = Settings.member_token(user.id)
+        Settings.create_session_user(%{"cookie" => token, "user_id" => user.id})
+
+        %{
+          status: "ok",
+          res: token,
+          user: user |> BluePotion.sanitize_struct(),
+          id: user.id,
+          user_id: user.id,
+          role_app_routes: []
+        }
+
+      _ ->
+        %{status: "error", reason: "Invalid credentials"}
+    end
+  end
+
+  defp email_pin_store_entry(norm_email, code, expires_at, params) do
+    base = %{code: code, attempts: 0, expires_at: expires_at}
+    pwd = Map.get(params, "password")
+    org_id = Map.get(params, "organization_id")
+
+    org_id =
+      cond do
+        is_integer(org_id) ->
+          org_id
+
+        is_binary(org_id) ->
+          case Integer.parse(org_id) do
+            {n, _} -> n
+            _ -> nil
+          end
+
+        true ->
+          nil
+      end
+
+    base =
+      if is_integer(org_id) do
+        Map.put(base, :organization_id, org_id)
+      else
+        base
+      end
+
+    if is_binary(pwd) and String.trim(pwd) != "" do
+      h =
+        pwd
+        |> String.trim()
+        |> then(&:crypto.hash(:sha512, &1))
+        |> Base.encode16()
+        |> String.downcase()
+
+      reg_name =
+        case Map.get(params, "name") |> to_string() |> String.trim() do
+          "" -> norm_email
+          n -> n
+        end
+
+      Map.merge(base, %{crypted_password: h, register_name: reg_name})
+    else
+      base
+    end
+  end
+
   def post(conn, params) do
     res =
       case params["scope"] do
+        "list_organizations" ->
+          orgs =
+            Settings.list_organizations()
+            |> Enum.map(fn org -> BluePotion.sanitize_struct(org) end)
+
+          %{status: "ok", data: orgs}
+
         "ota_update" ->
           BlogEngineWeb.Endpoint.broadcast("user:#{params["name"]}", "ota_update", %{
             "action" => "start_ota",
@@ -1319,12 +1459,23 @@ defmodule BlogEngineWeb.ApiController do
           %{status: "ok", res: params}
 
         "user_fcm_token" ->
-          check_staff = params["user_token"] |> BlogEngine.Settings.get_cookie_user_by_cookie()
+          session = params["user_token"] |> BlogEngine.Settings.get_cookie_user_by_cookie()
 
-          if check_staff != nil do
-            # this is a Staff struct
+          staff =
+            case session do
+              %{user: %BlogEngine.Settings.Staff{} = s} ->
+                s
+
+              %BlogEngine.Settings.SessionUser{user: %BlogEngine.Settings.Staff{} = s} ->
+                s
+
+              _ ->
+                nil
+            end
+
+          if staff != nil do
             Settings.create_messaging_device(%{
-              "staff_id" => check_staff.user.id,
+              "staff_id" => staff.id,
               "uuid" => params["token"]
             })
           end
@@ -1344,6 +1495,131 @@ defmodule BlogEngineWeb.ApiController do
           staff = Settings.get_staff!(params["id"])
           Settings.update_staff(staff, %{"organization_id" => nil})
           %{status: "ok"}
+
+        "send_email_pin" ->
+          email = Map.get(params, "email")
+          name = Map.get(params, "name", email)
+          from_email = Map.get(params, "from_email", "developer@djtech4u.com")
+
+          code = (:rand.uniform(899_999) + 100_000) |> Integer.to_string()
+
+          pid = Process.whereis(:email_pin_store)
+
+          pid =
+            if pid == nil do
+              {:ok, pid} = Agent.start_link(fn -> %{} end)
+              Process.register(pid, :email_pin_store)
+              pid
+            else
+              pid
+            end
+
+          expires_at = DateTime.utc_now() |> DateTime.add(600, :second) |> DateTime.to_unix()
+          norm_email = String.downcase(email)
+
+          Agent.update(pid, fn state ->
+            Map.put(
+              state,
+              norm_email,
+              email_pin_store_entry(norm_email, code, expires_at, params)
+            )
+          end)
+
+          Elixir.Task.start_link(BlogEngine.Email, :send_verification_email, [
+            email,
+            from_email,
+            %{},
+            %{name: name, pin: code}
+          ])
+
+          %{status: "ok"}
+
+        "verify_email_pin" ->
+          email =
+            params
+            |> Map.get("email", "")
+            |> to_string()
+            |> String.trim()
+            |> String.downcase()
+
+          pin =
+            params
+            |> Map.get("pin", "")
+            |> to_string()
+            |> String.replace(~r/[^0-9]/, "")
+
+          pid = Process.whereis(:email_pin_store)
+
+          cond do
+            email == "" or pin == "" ->
+              %{status: "error", reason: "Email and 6-digit code are required."}
+
+            String.length(pin) != 6 ->
+              %{status: "error", reason: "Enter the 6-digit code from your email."}
+
+            pid == nil ->
+              %{status: "error", reason: "No code on file. Go back and request a new code."}
+
+            true ->
+              stored = Agent.get(pid, fn state -> Map.get(state, email) end)
+
+              case stored do
+                nil ->
+                  %{status: "error", reason: "No code on file. Go back and request a new code."}
+
+                %{code: code, attempts: attempts, expires_at: expires_at} ->
+                  now = DateTime.utc_now() |> DateTime.to_unix()
+
+                  cond do
+                    now > expires_at ->
+                      Agent.update(pid, fn state -> Map.delete(state, email) end)
+
+                      %{
+                        status: "error",
+                        reason: "That code has expired. Request a new one from registration."
+                      }
+
+                    attempts >= 5 ->
+                      Agent.update(pid, fn state -> Map.delete(state, email) end)
+
+                      %{
+                        status: "error",
+                        reason: "Too many incorrect attempts. Request a new code."
+                      }
+
+                    code == pin ->
+                      reg = Settings.register_verified_member_from_pin(email, stored)
+
+                      Agent.update(pid, fn state -> Map.delete(state, email) end)
+
+                      case reg do
+                        {:ok, _} ->
+                          %{status: "ok"}
+
+                        {:error, :already_registered} ->
+                          %{
+                            status: "error",
+                            reason: "This email is already registered. Sign in instead."
+                          }
+
+                        {:error, %Ecto.Changeset{} = cs} ->
+                          msg =
+                            cs.errors
+                            |> Enum.map(fn {f, {m, _}} -> "#{f} #{m}" end)
+                            |> Enum.join("; ")
+
+                          %{status: "error", reason: "Could not save account: #{msg}"}
+                      end
+
+                    true ->
+                      Agent.update(pid, fn state ->
+                        Map.update!(state, email, fn v -> %{v | attempts: v.attempts + 1} end)
+                      end)
+
+                      %{status: "error", reason: "Invalid code. Try again."}
+                  end
+              end
+          end
 
         "gen_static_qr" ->
           device = Settings.get_device_by_name(params["name"]) |> IO.inspect()
@@ -1440,6 +1716,40 @@ defmodule BlogEngineWeb.ApiController do
 
           %{name: final_data}
 
+        "end_user_create_sale" ->
+          user = Settings.get_user!(params["user_id"])
+
+          {:ok, sale} =
+            Settings.create_sale(%{
+              sales_date: Date.utc_today(),
+              organization_id: params["organization_id"],
+              user_id: user.id,
+              amount: params["amount"],
+              status: :pending_payment,
+              sales_type: :topup,
+              payment_channel: "fpx",
+              uid: Ecto.UUID.generate()
+            })
+
+          url =
+            Razer.payment_page(
+              "fpx",
+              "#{sale.amount}",
+              "TOPUP-#{sale.id}",
+              "djtechplt_Dev",
+              "e37344c535a8d12000294306994251a3",
+              %{
+                fullname: user.fullname,
+                phone: user.phone,
+                username: user.username,
+                email: user.email
+              }
+            )
+
+          Settings.update_sale(sale, %{payment_url: url, payment_ref: "TOPUP-#{sale.id}"})
+
+          %{status: "ok", url: url}
+
         "checkout" ->
           sample = %{
             "item_id" => 2,
@@ -1491,6 +1801,175 @@ defmodule BlogEngineWeb.ApiController do
 
           %{name: final_data}
 
+        "dispense_token" ->
+          token = Map.get(params, "token")
+          raw_device_id = Map.get(params, "device_id")
+
+          device_id =
+            case raw_device_id do
+              v when is_integer(v) ->
+                v
+
+              v when is_binary(v) ->
+                case Integer.parse(String.trim(v)) do
+                  {i, _} -> i
+                  _ -> 0
+                end
+
+              _ ->
+                0
+            end
+
+          with true <- is_binary(token) and String.trim(token) != "",
+               decoded when decoded != nil <- Settings.decode_token(String.trim(token)),
+               user_id when is_integer(user_id) <- Map.get(decoded, :id),
+               true <- is_integer(device_id) and device_id > 0 do
+            uuid = Ecto.UUID.generate()
+
+            device =
+              Settings.get_device!(device_id)
+              |> BlogEngine.Repo.preload(:executor_board)
+
+            executor_board = device.executor_board
+
+            command_device =
+              if executor_board != nil do
+                executor_board
+              else
+                device
+              end
+
+            outlet_id =
+              case Map.get(params, "outlet_id") do
+                nil -> Map.get(device, :outlet_id)
+                v ->
+                  case v do
+                    i when is_integer(i) -> i
+                    b when is_binary(b) ->
+                      case Integer.parse(String.trim(b)) do
+                        {i, _} -> i
+                        _ -> 0
+                      end
+                    _ ->
+                      0
+                  end
+              end
+
+            outlet =
+              if is_integer(outlet_id) and outlet_id > 0 do
+                Settings.get_outlet!(outlet_id)
+              else
+                nil
+              end
+
+            price_per_minutes =
+              cond do
+                outlet != nil and is_number(outlet.price_per_minutes) -> outlet.price_per_minutes
+                true -> 0
+              end
+
+            reps_requested =
+              case Map.get(params, "value") do
+                v when is_integer(v) -> v
+                v when is_binary(v) ->
+                  case Integer.parse(String.trim(v)) do
+                    {i, _} -> i
+                    _ -> 0
+                  end
+                _ ->
+                  0
+              end
+
+            reps_requested = max(reps_requested, 1)
+            amount_rm = Float.round(reps_requested * price_per_minutes * 1.0, 2)
+
+            if price_per_minutes <= 0 do
+              %{status: "error", reason: "Outlet price not configured"}
+            else
+              ut = Settings.get_user_topup_by_user_and_organization(user_id, device.organization_id)
+              balance = if ut == nil, do: 0.0, else: Map.get(ut, :balance) || 0.0
+
+              if balance < amount_rm do
+                %{status: "error", reason: "Insufficient balance"}
+              else
+                reps =
+                  if command_device.skip_first do
+                    reps_requested - 1
+                  else
+                    reps_requested
+                  end
+
+                {delay, reps} =
+                  if reps == 0 do
+                    {0.01, 1}
+                  else
+                    {command_device.default_delay, reps}
+                  end
+
+                format = command_device.format
+
+                job_content =
+                  if command_device.keep_pending_task do
+                    Jason.encode!(%{
+                      "action" => "start",
+                      "reps" => reps_requested,
+                      "delay" => delay,
+                      "uuid" => uuid,
+                      "pin" => command_device.default_io_pin
+                    })
+                  end
+
+                remarks =
+                  "sales id:nil start Token dispense x#{reps_requested} with reps: #{reps_requested} delay: #{delay} on pin #{command_device.default_io_pin}"
+
+                device_log_res =
+                  BlogEngine.Settings.create_device_log(%{
+                    device_id: command_device.id,
+                    uuid: uuid,
+                    job_content: job_content,
+                    remarks: remarks
+                  })
+
+                case device_log_res do
+                  {:ok, %BlogEngine.Settings.DeviceLog{} = dl} ->
+                    case Settings.create_user_topup_transaction(%{
+                           user_id: user_id,
+                           organization_id: device.organization_id,
+                           amount: (-amount_rm),
+                           remarks: "Token dispense x#{reps_requested}",
+                           sales_id: nil,
+                           device_log_id: dl.id
+                         }) do
+                      {:ok, trx} ->
+                        if command_device.is_cloridge do
+                          CloridgeAPI.send_message(reps, command_device.cloridge_device_uid)
+                        else
+                          send_device_command(command_device.name, %{
+                            "action" => "start",
+                            "format" => format,
+                            "reps" => reps,
+                            "delay" => delay,
+                            "uuid" => uuid,
+                            "pin" => command_device.default_io_pin
+                          })
+                        end
+
+                        %{status: "ok", reps: reps_requested, before: trx.before_amt, after: trx.after_amt}
+
+                      {:error, reason} ->
+                        %{status: "error", reason: inspect(reason)}
+                    end
+
+                  _ ->
+                    %{status: "error", reason: "Could not create device log"}
+                end
+              end
+            end
+          else
+            _ ->
+              %{status: "error", reason: "Unauthorized"}
+          end
+
         "start_pwm" ->
           # BlogEngineWeb.Endpoint.broadcast("user:00000000-0000-0000-d83a-dd9f81e5", "ping", %{"action" => "start", "reps" => 10})
           uuid = Ecto.UUID.generate()
@@ -1529,14 +2008,6 @@ defmodule BlogEngineWeb.ApiController do
           if device.is_cloridge do
             CloridgeAPI.send_message(reps, device.cloridge_device_uid)
           else
-            # BlogEngineWeb.Endpoint.broadcast("user:#{params["name"]}", "start_pwm", %{
-            #   "action" => params["action"],
-            #   "format" => format,
-            #   "reps" => reps,
-            #   "delay" => delay,
-            #   "uuid" => uuid,
-            #   "pin" => device.default_io_pin
-            # })
             send_device_command(params["name"], %{
               "action" => params["action"],
               "format" => format,
@@ -1558,13 +2029,48 @@ defmodule BlogEngineWeb.ApiController do
               })
             end
 
-          BlogEngine.Settings.create_device_log(%{
-            device_id: device.id,
-            uuid: uuid,
-            job_content: job_content,
-            remarks:
-              "manual start #{format} #{params["item_name"]} on pin #{device.default_io_pin}"
-          })
+          remarks = "manual start #{format} #{params["item_name"]} on pin #{device.default_io_pin}"
+
+          device_log_res =
+            BlogEngine.Settings.create_device_log(%{
+              device_id: device.id,
+              uuid: uuid,
+              job_content: job_content,
+              remarks: remarks
+            })
+
+          # When dispensing tokens as part of a user topup, persist a linked topup transaction.
+          # This is best-effort: only creates a record when the webhook includes a user id.
+          if params["item_name"] == "Token dispense" do
+            user_id =
+              cond do
+                is_integer(params["user_id"]) -> params["user_id"]
+                is_binary(params["user_id"]) and String.trim(params["user_id"]) != "" ->
+                  case Integer.parse(String.trim(params["user_id"])) do
+                    {i, _} -> i
+                    _ -> nil
+                  end
+                true -> nil
+              end
+
+            case {user_id, device_log_res} do
+              {nil, _} ->
+                nil
+
+              {uid, {:ok, %BlogEngine.Settings.DeviceLog{} = dl}} ->
+                BlogEngine.Settings.create_user_topup_transaction(%{
+                  user_id: uid,
+                  organization_id: device.organization_id,
+                  amount: Map.get(params, "amount", 0),
+                  remarks: remarks,
+                  device_log_id: dl.id,
+                  sales_id: Map.get(params, "sales_id")
+                })
+
+              _ ->
+                nil
+            end
+          end
 
           %{status: "ok"}
 
@@ -1626,23 +2132,33 @@ defmodule BlogEngineWeb.ApiController do
           end
 
         "login" ->
-          auth = Settings.auth_user(params["user"]) |> IO.inspect()
+          member_password_login_response(params)
 
-          case auth do
-            {:ok, user} ->
-              token = Settings.member_token(user.id)
-              Settings.create_session_user(%{"cookie" => token, "user_id" => user.id})
+        "member_sign_in" ->
+          member_password_login_response(params)
 
-              %{
-                status: "ok",
-                res:
-                  user
-                  |> BluePotion.sanitize_struct()
-                  |> Map.put(:token, token)
-              }
+        "firebase_signin" ->
+          params
+          |> normalize_firebase_signin_payload()
+          |> Settings.sign_in_with_firebase()
+          |> case do
+            {:ok, %{user: u}} ->
+              %{status: "ok", res: u}
 
-            _ ->
-              %{status: "error"}
+            {:error, reason} ->
+              %{status: "error", reason: firebase_signin_error_message(reason)}
+          end
+
+        "google_signin" ->
+          params
+          |> normalize_firebase_signin_payload()
+          |> Settings.sign_in_with_firebase()
+          |> case do
+            {:ok, %{user: u}} ->
+              %{status: "ok", res: u}
+
+            {:error, reason} ->
+              %{status: "error", reason: firebase_signin_error_message(reason)}
           end
 
         "operator_subscribe_plan" ->
@@ -1651,15 +2167,18 @@ defmodule BlogEngineWeb.ApiController do
               case Settings.get_staff_by_username(username) do
                 nil ->
                   {:error, "Unauthorized."}
+
                 staff ->
-                case Settings.operator_subscribe_plan_for_staff(staff, params) do
-                  {:ok, map} ->
-                    map
-                  {:error, reason} when is_binary(reason) ->
-                    %{status: "error", reason: reason}
-                  other ->
-                    %{status: "error", reason: inspect(other)}
-                end
+                  case Settings.operator_subscribe_plan_for_staff(staff, params) do
+                    {:ok, map} ->
+                      map
+
+                    {:error, reason} when is_binary(reason) ->
+                      %{status: "error", reason: reason}
+
+                    other ->
+                      %{status: "error", reason: inspect(other)}
+                  end
               end
 
             {:member, _} ->
@@ -1669,6 +2188,85 @@ defmodule BlogEngineWeb.ApiController do
               {:error, "Unauthorized."}
           end
           |> IO.inspect(label: "operator_subscribe_plan")
+
+        "staff_refund_user_topup" ->
+          case Map.get(conn.assigns, :api_auth) do
+            {:admin, username} when is_binary(username) ->
+              case Settings.get_staff_by_username(username) do
+                nil ->
+                  %{status: "error", reason: "Unauthorized."}
+
+                staff ->
+                  staff_org_id = staff.organization_id
+
+                  cond do
+                    staff_org_id in [nil, 0] ->
+                      %{status: "error", reason: "Staff has no organization."}
+
+                    true ->
+                      user_id = parse_refund_user_id(params["user_id"])
+                      amount = parse_refund_amount(params["amount"])
+                      remarks = params["remarks"] |> to_string() |> String.trim()
+                      ref_tid = parse_refund_user_id(params["ref_transaction_id"])
+
+                      cond do
+                        user_id == nil ->
+                          %{status: "error", reason: "user_id required"}
+
+                        amount == nil or amount <= 0 ->
+                          %{status: "error", reason: "amount must be a positive number"}
+
+                        remarks == "" ->
+                          %{status: "error", reason: "remarks required"}
+
+                        true ->
+                          case Settings.get_user!(user_id) do
+                            nil ->
+                              %{status: "error", reason: "User not found"}
+
+                            member ->
+                              if member.organization_id == staff_org_id do
+                                refund_remarks =
+                                  "Staff refund (staff ##{staff.id}): #{remarks}" <>
+                                    if(ref_tid,
+                                      do: " [ref trx ##{ref_tid}]",
+                                      else: ""
+                                    )
+
+                                case Settings.create_user_topup_transaction(%{
+                                       user_id: user_id,
+                                       organization_id: staff_org_id,
+                                       amount: amount,
+                                       remarks: refund_remarks
+                                     }) do
+                                  {:ok, trx} ->
+                                    %{
+                                      status: "ok",
+                                      transaction: trx |> BluePotion.sanitize_struct()
+                                    }
+
+                                  {:error, %Ecto.Changeset{} = cs} ->
+                                    msg =
+                                      cs.errors
+                                      |> Enum.map(fn {f, {m, _}} -> "#{f} #{m}" end)
+                                      |> Enum.join("; ")
+
+                                    %{status: "error", reason: msg}
+
+                                  {:error, other} ->
+                                    %{status: "error", reason: inspect(other)}
+                                end
+                              else
+                                %{status: "error", reason: "User is not in your organization."}
+                              end
+                          end
+                      end
+                  end
+              end
+
+            _ ->
+              %{status: "error", reason: "Staff sign-in required."}
+          end
 
         _ ->
           %{status: "ok"}
@@ -1774,6 +2372,75 @@ defmodule BlogEngineWeb.ApiController do
     IO.inspect(params)
 
     params
+  end
+
+  def options_ok(conn, _params) do
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(200, Jason.encode!(%{status: "ok"}))
+  end
+
+  def update_user_profile(conn, params) do
+    case Map.get(conn.assigns, :api_auth) do
+      {:member, %{id: user_id}} when is_integer(user_id) ->
+        user = Settings.get_user!(user_id)
+
+        if user == nil do
+          conn
+          |> put_resp_content_type("application/json")
+          |> send_resp(404, Jason.encode!(%{status: "error", reason: "User not found"}))
+        else
+          attrs =
+            params
+            |> Map.take(["fullname", "username", "phone", "email", "password"])
+            |> Enum.reject(fn
+              {"password", v} when v in [nil, ""] -> true
+              {_k, v} when v in [nil, ""] -> true
+              _ -> false
+            end)
+            |> Map.new()
+
+          Settings.update_user(user, attrs)
+          |> case do
+            {:ok, updated_user} ->
+              conn
+              |> put_resp_content_type("application/json")
+              |> send_resp(200, Jason.encode!(%{status: "ok", user: BluePotion.sanitize_struct(updated_user)}))
+
+            {:error, reason} ->
+              conn
+              |> put_resp_content_type("application/json")
+              |> send_resp(400, Jason.encode!(%{status: "error", reason: inspect(reason)}))
+          end
+        end
+
+      _ ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(403, Jason.encode!(%{status: "error", reason: "Not authorized"}))
+    end
+  end
+
+  def get_user_profile(conn, _params) do
+    case Map.get(conn.assigns, :api_auth) do
+      {:member, %{id: user_id}} when is_integer(user_id) ->
+        case Settings.get_user!(user_id) do
+          nil ->
+            conn
+            |> put_resp_content_type("application/json")
+            |> send_resp(404, Jason.encode!(%{status: "error", reason: "User not found"}))
+
+          user ->
+            conn
+            |> put_resp_content_type("application/json")
+            |> send_resp(200, Jason.encode!(%{status: "ok", user: BluePotion.sanitize_struct(user)}))
+        end
+
+      _ ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(403, Jason.encode!(%{status: "error", reason: "Not authorized"}))
+    end
   end
 
   def form_submission(conn, params) do
@@ -3341,4 +4008,47 @@ defmodule BlogEngineWeb.ApiController do
       _ -> "idle"
     end
   end
+
+  defp normalize_firebase_signin_payload(params) when is_map(params) do
+    nested =
+      cond do
+        is_map(params["firebase"]) -> params["firebase"]
+        is_map(params["result"]) -> params["result"]
+        true -> %{}
+      end
+
+    uid = nested["uid"] || params["uid"]
+    email = nested["email"] || params["email"]
+
+    email_verified =
+      nested["emailVerified"] || nested["email_verified"] || params["emailVerified"] ||
+        params["email_verified"]
+
+    name = nested["name"] || nested["displayName"] || params["name"]
+    photo = nested["photoURL"] || nested["photo_url"] || params["photoURL"]
+
+    %{
+      "uid" => uid,
+      "email" => email,
+      "email_verified" => email_verified,
+      "name" => name,
+      "photo_url" => photo
+    }
+  end
+
+  defp firebase_signin_error_message(:invalid_firebase_uid), do: "Invalid Firebase UID"
+
+  defp firebase_signin_error_message(:email_not_verified),
+    do: "Email must be verified in Firebase"
+
+  defp firebase_signin_error_message(:firebase_user_needs_email),
+    do: "Link a verified email to your Firebase account to match your profile"
+
+  defp firebase_signin_error_message(:no_account_for_firebase),
+    do: "No profile found for this email. Ask an administrator to create your account first."
+
+  defp firebase_signin_error_message({:could_not_link_firebase, _}),
+    do: "Could not link Firebase ID to your profile"
+
+  defp firebase_signin_error_message(_), do: "Firebase sign-in failed"
 end

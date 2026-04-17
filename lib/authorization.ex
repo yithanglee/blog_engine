@@ -63,9 +63,15 @@ defmodule BlogEngine.ApiAuthorization do
     if conn.method == "POST" || conn.method == "OPTIONS" do
       cond do
         conn.params["scope"] in [
+          "list_organizations",
+          "send_email_pin",
+          "verify_email_pin",
           "login",
+          "member_sign_in",
           "override",
           "sign_in",
+          "firebase_signin",
+          "google_signin",
           "update_customer",
           "food_payment",
           "admin_menus",
@@ -73,7 +79,8 @@ defmodule BlogEngine.ApiAuthorization do
           "link_register",
           "checkout",
           "checkout_by_amount",
-          "thank_you"
+          "thank_you",
+          "user_fcm_token"
         ] ->
           conn
 

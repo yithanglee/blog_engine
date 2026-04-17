@@ -17,6 +17,14 @@ defmodule BlogEngine.Email do
     |> render("custom_email.html", html: html)
   end
 
+  def verification_email(user_email, from_email, brand_map, user_map \\ %{name: "there"}) do
+    base_email(from_email)
+    |> to(user_email)
+    |> subject("Verification")
+    |> put_header("Reply-To", from_email)
+    |> render("verification_email.html", brand: brand_map, user: user_map)
+  end
+
   def welcome_email(user_email, from_email, brand_map, user_map \\ %{name: "John Doe"}) do
     # Build your default email then customize for welcome
     base_email(from_email)
@@ -33,6 +41,11 @@ defmodule BlogEngine.Email do
 
     # Set default text layout
     # |> put_text_layout({BlogEngineWeb.LayoutView, "email.text"})
+  end
+
+  def send_verification_email(user_email, from_email, brand_map, user_map) do
+    verification_email(user_email, from_email, brand_map, user_map)
+    |> BlogEngine.Mailer.deliver_now()
   end
 end
 
