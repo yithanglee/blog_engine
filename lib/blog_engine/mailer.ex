@@ -1,6 +1,32 @@
 defmodule BlogEngine.Mailer do
   use Bamboo.Mailer, otp_app: :blog_engine
+
+  def send_email_for_org(email) do
+    adapter_config = get_smtp_config_for_org() |> IO.inspect()
+
+    deliver_now(email, config: adapter_config) |> IO.inspect()
+  end
+
+  defp get_smtp_config_for_org() do
+    %{
+      adapter: Bamboo.SMTPAdapter,
+      server: "localhost",
+      hostname: "mail.damienslab.com",
+      port: 25,
+      username: "ubuntu",
+      password: "unwanted2",
+      tls: :always,
+      allowed_tls_versions: [:"tlsv1.2"],
+      tls_log_level: :error,
+      tls_verify: :verify_none,
+      ssl: false,
+      retries: 1,
+      no_mx_lookups: false,
+      auth: :if_available
+    }
+  end
 end
+
 
 defmodule BlogEngine.Email do
   import Bamboo.Email
@@ -45,7 +71,7 @@ defmodule BlogEngine.Email do
 
   def send_verification_email(user_email, from_email, brand_map, user_map) do
     verification_email(user_email, from_email, brand_map, user_map)
-    |> BlogEngine.Mailer.deliver_now()
+    |> BlogEngine.Mailer.send_email_for_org()
   end
 end
 
