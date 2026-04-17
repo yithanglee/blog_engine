@@ -289,7 +289,7 @@ defmodule BlogEngineWeb.PageController do
   end
 
   @doc """
-  BlogEngineWeb.PageController.notification(Phoenix.ConnTest.build_conn(), topup_params)
+  BlogEngineWeb.PageController.notification(Phoenix.ConnTest.build_conn(), test_params)
   """
 
   def notification(conn, params) do
@@ -376,7 +376,11 @@ defmodule BlogEngineWeb.PageController do
       |> IO.inspect(label: "sales_by_payment_ref")
 
     topup_check =
-      BlogEngine.Settings.get_sale!(Map.get(params, "orderid") |> String.replace("TOPUP-", ""))
+      if String.contains?(params["orderid"], "TOPUP-") do
+        BlogEngine.Settings.get_sale!(Map.get(params, "orderid") |> String.replace("TOPUP-", ""))
+      else
+        nil
+      end
 
     cond do
       check != nil ->
