@@ -3141,14 +3141,25 @@ defmodule BlogEngine.Settings do
   end
 
   def complete_topup(topup_sale) do
+    paid = to_float_2dp(topup_sale.amount)
+    credit = topup_promo_credit_amount(paid)
+    bonus = topup_promo_bonus_amount(paid)
+
+    remarks =
+      if bonus > 0 do
+        "Topup payment (#{format_rm_whole(paid)}+#{format_rm_whole(bonus)} promo)"
+      else
+        "Topup payment"
+      end
+
     Multi.new()
     |> Multi.run(:user_topup_multi, fn _repo, %{} ->
       multi_res =
         BlogEngine.Settings.create_user_topup_transaction(%{
           user_id: Map.get(topup_sale, :user_id),
           organization_id: topup_sale.organization_id,
-          amount: topup_sale.amount,
-          remarks: "Topup payment",
+          amount: credit,
+          remarks: remarks,
           sales_id: topup_sale.id,
           device_log_id: nil
         })
@@ -3169,6 +3180,26 @@ defmodule BlogEngine.Settings do
       other ->
         {:error, other}
     end
+  end
+
+  defp topup_promo_bonus_amount(paid) when is_number(paid) do
+    p = to_float_2dp(paid)
+
+    cond do
+      p == 10.0 -> 1.0
+      p == 20.0 -> 2.0
+      p == 50.0 -> 5.0
+      true -> 0.0
+    end
+  end
+
+  defp topup_promo_credit_amount(paid) when is_number(paid) do
+    paid = to_float_2dp(paid)
+    (paid + topup_promo_bonus_amount(paid)) |> to_float_2dp()
+  end
+
+  defp format_rm_whole(n) when is_number(n) do
+    n |> to_float_2dp() |> :erlang.trunc() |> Integer.to_string()
   end
 
   alias BlogEngine.Settings.UserTopupTransaction
