@@ -14,6 +14,8 @@ defmodule BlogEngine.Settings.Outlet do
     field(:phone, :string)
     field(:email, :string)
     field(:collection_id, :string)
+    field(:lat, :float)
+    field(:lng, :float)
     belongs_to(:organization, BlogEngine.Settings.Organization)
     field(:price_per_minutes, :float, default: 0.5)
     field(:payment_gateway, :string)
@@ -39,6 +41,8 @@ defmodule BlogEngine.Settings.Outlet do
       :uid,
       :name,
       :address,
+      :lat,
+      :lng,
       :is_blocked,
       :block_reason
     ])

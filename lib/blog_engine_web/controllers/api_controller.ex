@@ -1438,6 +1438,63 @@ defmodule BlogEngineWeb.ApiController do
   def post(conn, params) do
     res =
       case params["scope"] do
+        "update_outlet_latlng" ->
+          session = params["user_token"] |> BlogEngine.Settings.get_cookie_user_by_cookie()
+
+          staff =
+            case session do
+              %{user: %BlogEngine.Settings.Staff{} = s} ->
+                s
+
+              %BlogEngine.Settings.SessionUser{user: %BlogEngine.Settings.Staff{} = s} ->
+                s
+
+              _ ->
+                nil
+            end
+
+          outlet_id =
+            case Map.get(params, "outlet_id") do
+              v when is_integer(v) -> v
+              v when is_binary(v) ->
+                case Integer.parse(String.trim(v)) do
+                  {i, _} -> i
+                  _ -> 0
+                end
+
+              _ ->
+                0
+            end
+
+          parse_float = fn v ->
+            cond do
+              is_float(v) -> v
+              is_integer(v) -> v / 1
+              is_binary(v) ->
+                case Float.parse(String.trim(v)) do
+                  {f, _} -> f
+                  _ -> nil
+                end
+
+              true ->
+                nil
+            end
+          end
+
+          lat = parse_float.(Map.get(params, "lat"))
+          lng = parse_float.(Map.get(params, "lng"))
+
+          with true <- staff != nil,
+               true <- outlet_id > 0,
+               true <- is_float(lat) and is_float(lng),
+               outlet <- Settings.get_outlet!(outlet_id),
+               {:ok, updated} <- Settings.update_outlet(outlet, %{"lat" => lat, "lng" => lng}) do
+            %{status: "ok", outlet: BluePotion.sanitize_struct(updated)}
+          else
+            _ ->
+              %{status: "error", message: "Unauthorized or invalid outlet/coordinates"}
+          end
+
         "list_organizations" ->
           orgs =
             Settings.list_organizations()

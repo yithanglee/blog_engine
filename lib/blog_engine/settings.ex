@@ -2621,6 +2621,22 @@ defmodule BlogEngine.Settings do
         d.name as device_long,
         count(l.id) as transactions,
         ROUND(COALESCE(sum(l.amount)::numeric, 0), 2) as amount,
+        ROUND(COALESCE(sum(l.amount) FILTER(WHERE COALESCE(l.sales_type, '') = 'cash')::numeric, 0), 2) as amount_cash,
+        ROUND(
+          COALESCE(
+            sum(l.amount) FILTER(
+              WHERE COALESCE(l.sales_type, '') = 'offline'
+                OR (l.payment_channel IS NOT NULL AND (
+                  l.payment_channel ILIKE '%qr%'
+                  OR l.payment_channel ILIKE '%duitnow%'
+                  OR l.payment_channel = 'duitnowsqr'
+                ))
+            )::numeric,
+            0
+          ),
+          2
+        ) as amount_qr,
+        ROUND(COALESCE(sum(l.amount) FILTER(WHERE COALESCE(l.sales_type, '') = 'topup')::numeric, 0), 2) as amount_topup,
         o.name as outlet,
         COALESCE(oz.name, 'n/a') as organization,
         ROUND(COALESCE(sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'MM') = '01')::numeric, 0), 2) AS jan,
