@@ -2368,7 +2368,10 @@ defmodule BlogEngine.Settings do
   end
 
   @doc """
-  Organization-wide hourly sales for today (Asia/Kuala_Lumpur), optional `device_id` filter.
+  Organization-wide hourly sales for a calendar day in `Asia/Kuala_Lumpur`.
+
+  * Optional `date` — `YYYY-MM-DD` (default: today in that timezone).
+  * Optional `device_id` — restrict to one device.
   """
   def organization_sales_today_by_hour(params) when is_map(params) do
     org_id =
@@ -2389,6 +2392,18 @@ defmodule BlogEngine.Settings do
     if org_id == nil do
       []
     else
+      local_date =
+        case Map.get(params, "date") do
+          d when is_binary(d) and d != "" ->
+            case Date.from_iso8601(d) do
+              {:ok, date} -> date
+              :error -> DateTime.now!("Asia/Kuala_Lumpur") |> DateTime.to_date()
+            end
+
+          _ ->
+            DateTime.now!("Asia/Kuala_Lumpur") |> DateTime.to_date()
+        end
+
       device_id =
         case Map.get(params, "device_id") do
           nil ->
@@ -2412,9 +2427,12 @@ defmodule BlogEngine.Settings do
 
       {extra_sql, bind} =
         if device_id do
-          {" AND s.device_id = $2", [org_id, device_id]}
+          {
+            " AND s.device_id = $3",
+            [org_id, local_date, device_id]
+          }
         else
-          {"", [org_id]}
+          {"", [org_id, local_date]}
         end
 
       query = """
@@ -2432,13 +2450,13 @@ defmodule BlogEngine.Settings do
               ))
           ),
           0
-        ) AS qr
+        ) AS qr,
+        COALESCE(SUM(s.amount) FILTER (WHERE COALESCE(s.sales_type, '') = 'topup'), 0) AS topup
       FROM sales s
       INNER JOIN devices d ON d.id = s.device_id
       WHERE d.organization_id = $1
         AND s.status = 'complete'
-        AND DATE((s.inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kuala_Lumpur')
-          = DATE(timezone('Asia/Kuala_Lumpur', now()))
+        AND DATE((s.inserted_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kuala_Lumpur') = $2::date
       #{extra_sql}
       GROUP BY 1
       ORDER BY 1
@@ -2448,7 +2466,7 @@ defmodule BlogEngine.Settings do
 
       hourly_map =
         hourly_rows
-        |> Enum.map(fn [hr, total, cash, qr] ->
+        |> Enum.map(fn [hr, total, cash, qr, topup] ->
           h = hr |> :erlang.trunc()
 
           {h,
@@ -2457,7 +2475,8 @@ defmodule BlogEngine.Settings do
              label: "#{String.pad_leading(Integer.to_string(h), 2, "0")}:00",
              total: decimal_to_float(total),
              cash: decimal_to_float(cash),
-             qr: decimal_to_float(qr)
+             qr: decimal_to_float(qr),
+             topup: decimal_to_float(topup)
            }}
         end)
         |> Map.new()
@@ -2468,7 +2487,8 @@ defmodule BlogEngine.Settings do
           label: "#{String.pad_leading(Integer.to_string(h), 2, "0")}:00",
           total: 0.0,
           cash: 0.0,
-          qr: 0.0
+          qr: 0.0,
+          topup: 0.0
         })
       end)
     end
@@ -2517,7 +2537,8 @@ defmodule BlogEngine.Settings do
         """
         sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{padded_day}') AS day_#{day},
         sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{padded_day}' AND l.sales_type = 'offline') AS day_#{day}_online_sum,
-        sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{padded_day}' AND l.sales_type = 'cash') AS day_#{day}_offline_sum
+        sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{padded_day}' AND l.sales_type = 'cash') AS day_#{day}_offline_sum,
+        sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{padded_day}' AND l.sales_type = 'topup') AS day_#{day}_topup_sum
         """
       end)
       |> Enum.join(",\n")
@@ -2531,6 +2552,7 @@ defmodule BlogEngine.Settings do
         sum(l.amount) as amount,
         count(l.id) FILTER (WHERE l.sales_type = 'offline') as sales_online,
         count(l.id) FILTER (WHERE l.sales_type = 'cash') as sales_offline,
+        count(l.id) FILTER (WHERE l.sales_type = 'topup') as sales_topup,
         o.name as outlet,
         COALESCE(oz.name, 'n/a') as organization,
         #{day_filters}

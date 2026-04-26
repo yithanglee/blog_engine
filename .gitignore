@@ -28,3 +28,8 @@ blog_engine-*.tar
 /priv/static/
 
 /media/
+
+.env
+.env.*
+.agents/
+scripts/
