@@ -167,7 +167,9 @@ defmodule BlogEngineWeb.ApiController do
         "get_user_topup_balance" ->
           org_id =
             case Map.get(params, "organization_id") do
-              v when is_integer(v) -> v
+              v when is_integer(v) ->
+                v
+
               v when is_binary(v) ->
                 case Integer.parse(String.trim(v)) do
                   {i, _} -> i
@@ -179,6 +181,7 @@ defmodule BlogEngineWeb.ApiController do
             end
 
           ut = Settings.get_user_topup_by_user_and_organization(id, org_id)
+
           bal =
             case ut do
               nil -> 0.0
@@ -1435,6 +1438,18 @@ defmodule BlogEngineWeb.ApiController do
     end
   end
 
+  defp password_reset_pin_store_ensure_pid do
+    pid = Process.whereis(:password_reset_pin_store)
+
+    if pid == nil do
+      {:ok, pid} = Agent.start_link(fn -> %{} end)
+      Process.register(pid, :password_reset_pin_store)
+      pid
+    else
+      pid
+    end
+  end
+
   def post(conn, params) do
     res =
       case params["scope"] do
@@ -1455,7 +1470,9 @@ defmodule BlogEngineWeb.ApiController do
 
           outlet_id =
             case Map.get(params, "outlet_id") do
-              v when is_integer(v) -> v
+              v when is_integer(v) ->
+                v
+
               v when is_binary(v) ->
                 case Integer.parse(String.trim(v)) do
                   {i, _} -> i
@@ -1468,8 +1485,12 @@ defmodule BlogEngineWeb.ApiController do
 
           parse_float = fn v ->
             cond do
-              is_float(v) -> v
-              is_integer(v) -> v / 1
+              is_float(v) ->
+                v
+
+              is_integer(v) ->
+                v / 1
+
               is_binary(v) ->
                 case Float.parse(String.trim(v)) do
                   {f, _} -> f
@@ -1678,6 +1699,184 @@ defmodule BlogEngineWeb.ApiController do
               end
           end
 
+        "forgot_password_request" ->
+          email =
+            params
+            |> Map.get("email", "")
+            |> to_string()
+            |> String.trim()
+            |> String.downcase()
+
+          cond do
+            email == "" ->
+              %{status: "error", reason: "Email is required."}
+
+            true ->
+              case Settings.get_user_by_email(email) do
+                nil ->
+                  %{status: "ok"}
+
+                user ->
+                  code = (:rand.uniform(899_999) + 100_000) |> Integer.to_string()
+                  pid = password_reset_pin_store_ensure_pid()
+                  expires_at = DateTime.utc_now() |> DateTime.add(600, :second) |> DateTime.to_unix()
+
+                  Agent.update(pid, fn state ->
+                    Map.put(
+                      state,
+                      email,
+                      %{code: code, attempts: 0, expires_at: expires_at, user_id: user.id}
+                    )
+                  end)
+
+                  display_name =
+                    case user.fullname do
+                      n when is_binary(n) ->
+                        t = String.trim(n)
+                        if t != "", do: t, else: email
+
+                      _ ->
+                        email
+                    end
+
+                  to_email =
+                    case user.email do
+                      e when is_binary(e) ->
+                        t = String.trim(e)
+                        if t != "", do: t, else: email
+
+                      _ ->
+                        email
+                    end
+
+                  from_email = Map.get(params, "from_email", "developer@djtech4u.com")
+
+                  Elixir.Task.start_link(BlogEngine.Email, :send_password_reset_email, [
+                    to_email,
+                    from_email,
+                    %{},
+                    %{name: display_name, pin: code}
+                  ])
+
+                  %{status: "ok"}
+              end
+          end
+
+        "verify_forgot_password_otp" ->
+          email =
+            params
+            |> Map.get("email", "")
+            |> to_string()
+            |> String.trim()
+            |> String.downcase()
+
+          pin =
+            params
+            |> Map.get("pin", "")
+            |> to_string()
+            |> String.replace(~r/[^0-9]/, "")
+
+          pid = Process.whereis(:password_reset_pin_store)
+
+          cond do
+            email == "" or pin == "" ->
+              %{status: "error", reason: "Email and 6-digit code are required."}
+
+            String.length(pin) != 6 ->
+              %{status: "error", reason: "Enter the 6-digit code from your email."}
+
+            pid == nil ->
+              %{status: "error", reason: "No reset code on file. Request a new code."}
+
+            true ->
+              stored = Agent.get(pid, fn state -> Map.get(state, email) end)
+
+              case stored do
+                nil ->
+                  %{status: "error", reason: "No reset code on file. Request a new code."}
+
+                %{code: code, attempts: attempts, expires_at: expires_at, user_id: user_id}
+                when is_integer(user_id) ->
+                  now = DateTime.utc_now() |> DateTime.to_unix()
+
+                  cond do
+                    now > expires_at ->
+                      Agent.update(pid, fn state -> Map.delete(state, email) end)
+
+                      %{status: "error", reason: "That code has expired. Request a new one."}
+
+                    attempts >= 5 ->
+                      Agent.update(pid, fn state -> Map.delete(state, email) end)
+
+                      %{status: "error", reason: "Too many incorrect attempts. Request a new code."}
+
+                    code == pin ->
+                      Agent.update(pid, fn state -> Map.delete(state, email) end)
+
+                      reset_token =
+                        Phoenix.Token.sign(
+                          BlogEngineWeb.Endpoint,
+                          "member_password_reset",
+                          user_id
+                        )
+
+                      %{status: "ok", reset_token: reset_token}
+
+                    true ->
+                      Agent.update(pid, fn state ->
+                        Map.update!(state, email, fn v -> %{v | attempts: v.attempts + 1} end)
+                      end)
+
+                      %{status: "error", reason: "Invalid code. Try again."}
+                  end
+
+                _ ->
+                  %{status: "error", reason: "No reset code on file. Request a new code."}
+              end
+          end
+
+        "reset_password_with_token" ->
+          reset_token = params |> Map.get("reset_token", "") |> to_string()
+          password = params |> Map.get("password", "") |> to_string()
+          trimmed_pwd = String.trim(password)
+
+          cond do
+            String.trim(reset_token) == "" ->
+              %{status: "error", reason: "Reset token is missing."}
+
+            trimmed_pwd == "" ->
+              %{status: "error", reason: "Password is required."}
+
+            String.length(trimmed_pwd) < 8 ->
+              %{status: "error", reason: "Password must be at least 8 characters."}
+
+            true ->
+              case Phoenix.Token.verify(
+                     BlogEngineWeb.Endpoint,
+                     "member_password_reset",
+                     reset_token,
+                     max_age: 900
+                   ) do
+                {:ok, user_id} ->
+                  user = Settings.get_user!(user_id)
+
+                  if user == nil do
+                    %{status: "error", reason: "Account not found."}
+                  else
+                    case Settings.update_user(user, %{"password" => trimmed_pwd}) do
+                      {:ok, _} ->
+                        %{status: "ok"}
+
+                      _ ->
+                        %{status: "error", reason: "Could not update password."}
+                    end
+                  end
+
+                {:error, _} ->
+                  %{status: "error", reason: "Reset session expired or invalid. Start again."}
+              end
+          end
+
         "gen_static_qr" ->
           device = Settings.get_device_by_name(params["name"]) |> IO.inspect()
 
@@ -1788,13 +1987,23 @@ defmodule BlogEngineWeb.ApiController do
               uid: Ecto.UUID.generate()
             })
 
+          sample_params = %{
+            "amount" => 1,
+            "device_id" => 27,
+            "organization_id" => 2,
+            "outlet_id" => 25,
+            "payment_channel" => "fpx",
+            "scope" => "end_user_create_sale",
+            "user_id" => 3
+          }
+          organization = Settings.get_organization!(params["organization_id"])
           url =
             Razer.payment_page(
               "fpx",
               "#{sale.amount}",
               "TOPUP-#{sale.id}",
-              "djtechplt_Dev",
-              "e37344c535a8d12000294306994251a3",
+              organization.mcode || "djtechplt_Dev",
+              organization.mkey || "e37344c535a8d12000294306994251a3",
               %{
                 fullname: user.fullname,
                 phone: user.phone,
@@ -1898,15 +2107,20 @@ defmodule BlogEngineWeb.ApiController do
 
             outlet_id =
               case Map.get(params, "outlet_id") do
-                nil -> Map.get(device, :outlet_id)
+                nil ->
+                  Map.get(device, :outlet_id)
+
                 v ->
                   case v do
-                    i when is_integer(i) -> i
+                    i when is_integer(i) ->
+                      i
+
                     b when is_binary(b) ->
                       case Integer.parse(String.trim(b)) do
                         {i, _} -> i
                         _ -> 0
                       end
+
                     _ ->
                       0
                   end
@@ -1927,12 +2141,15 @@ defmodule BlogEngineWeb.ApiController do
 
             reps_requested =
               case Map.get(params, "value") do
-                v when is_integer(v) -> v
+                v when is_integer(v) ->
+                  v
+
                 v when is_binary(v) ->
                   case Integer.parse(String.trim(v)) do
                     {i, _} -> i
                     _ -> 0
                   end
+
                 _ ->
                   0
               end
@@ -1943,7 +2160,9 @@ defmodule BlogEngineWeb.ApiController do
             if price_per_minutes <= 0 do
               %{status: "error", reason: "Outlet price not configured"}
             else
-              ut = Settings.get_user_topup_by_user_and_organization(user_id, device.organization_id)
+              ut =
+                Settings.get_user_topup_by_user_and_organization(user_id, device.organization_id)
+
               balance = if ut == nil, do: 0.0, else: Map.get(ut, :balance) || 0.0
 
               if balance < amount_rm do
@@ -1992,7 +2211,7 @@ defmodule BlogEngineWeb.ApiController do
                     case Settings.create_user_topup_transaction(%{
                            user_id: user_id,
                            organization_id: device.organization_id,
-                           amount: (-amount_rm),
+                           amount: -amount_rm,
                            remarks: "Token dispense x#{reps_requested}",
                            sales_id: nil,
                            device_log_id: dl.id
@@ -2011,7 +2230,12 @@ defmodule BlogEngineWeb.ApiController do
                           })
                         end
 
-                        %{status: "ok", reps: reps_requested, before: trx.before_amt, after: trx.after_amt}
+                        %{
+                          status: "ok",
+                          reps: reps_requested,
+                          before: trx.before_amt,
+                          after: trx.after_amt
+                        }
 
                       {:error, reason} ->
                         %{status: "error", reason: inspect(reason)}
@@ -2086,7 +2310,8 @@ defmodule BlogEngineWeb.ApiController do
               })
             end
 
-          remarks = "manual start #{format} #{params["item_name"]} on pin #{device.default_io_pin}"
+          remarks =
+            "manual start #{format} #{params["item_name"]} on pin #{device.default_io_pin}"
 
           device_log_res =
             BlogEngine.Settings.create_device_log(%{
@@ -2101,13 +2326,17 @@ defmodule BlogEngineWeb.ApiController do
           if params["item_name"] == "Token dispense" do
             user_id =
               cond do
-                is_integer(params["user_id"]) -> params["user_id"]
+                is_integer(params["user_id"]) ->
+                  params["user_id"]
+
                 is_binary(params["user_id"]) and String.trim(params["user_id"]) != "" ->
                   case Integer.parse(String.trim(params["user_id"])) do
                     {i, _} -> i
                     _ -> nil
                   end
-                true -> nil
+
+                true ->
+                  nil
               end
 
             case {user_id, device_log_res} do
@@ -2462,7 +2691,10 @@ defmodule BlogEngineWeb.ApiController do
             {:ok, updated_user} ->
               conn
               |> put_resp_content_type("application/json")
-              |> send_resp(200, Jason.encode!(%{status: "ok", user: BluePotion.sanitize_struct(updated_user)}))
+              |> send_resp(
+                200,
+                Jason.encode!(%{status: "ok", user: BluePotion.sanitize_struct(updated_user)})
+              )
 
             {:error, reason} ->
               conn
@@ -2490,7 +2722,10 @@ defmodule BlogEngineWeb.ApiController do
           user ->
             conn
             |> put_resp_content_type("application/json")
-            |> send_resp(200, Jason.encode!(%{status: "ok", user: BluePotion.sanitize_struct(user)}))
+            |> send_resp(
+              200,
+              Jason.encode!(%{status: "ok", user: BluePotion.sanitize_struct(user)})
+            )
         end
 
       _ ->

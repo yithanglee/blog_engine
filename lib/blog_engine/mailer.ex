@@ -51,6 +51,14 @@ defmodule BlogEngine.Email do
     |> render("verification_email.html", brand: brand_map, user: user_map)
   end
 
+  def password_reset_email(user_email, from_email, brand_map, user_map \\ %{name: "there"}) do
+    base_email(from_email)
+    |> to(user_email)
+    |> subject("Reset your password")
+    |> put_header("Reply-To", from_email)
+    |> render("password_reset_email.html", brand: brand_map, user: user_map)
+  end
+
   def welcome_email(user_email, from_email, brand_map, user_map \\ %{name: "John Doe"}) do
     # Build your default email then customize for welcome
     base_email(from_email)
@@ -71,6 +79,11 @@ defmodule BlogEngine.Email do
 
   def send_verification_email(user_email, from_email, brand_map, user_map) do
     verification_email(user_email, from_email, brand_map, user_map)
+    |> BlogEngine.Mailer.send_email_for_org()
+  end
+
+  def send_password_reset_email(user_email, from_email, brand_map, user_map) do
+    password_reset_email(user_email, from_email, brand_map, user_map)
     |> BlogEngine.Mailer.send_email_for_org()
   end
 end

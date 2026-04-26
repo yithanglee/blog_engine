@@ -59,6 +59,8 @@ defmodule BlogEngine.Utility2 do
     mod
   end
 
+  require IEx
+
   @doc """
   Scalable datatable query implementation with:
   - No Code.eval_string (uses safe macro-based approach)
@@ -88,7 +90,12 @@ defmodule BlogEngine.Utility2 do
     base_query = apply_dynamic_joins(base_query, additional_joins)
 
     # Build filtered query with search conditions
-    filtered_query = apply_dynamic_search(base_query, additional_search)
+    filtered_query =
+      apply_dynamic_search(base_query, additional_search)
+      |> limit(^limit)
+      |> offset(^offset)
+      |> IO.inspect(label: "final_query")
+
 
     # Calculate counts efficiently using subqueries
     {total_count, filtered_count} =
@@ -98,8 +105,6 @@ defmodule BlogEngine.Utility2 do
     final_query =
       filtered_query
       |> apply_dynamic_order(additional_order)
-      |> limit(^limit)
-      |> offset(^offset)
       |> preload(^preloads)
 
     # Execute query
@@ -171,8 +176,18 @@ defmodule BlogEngine.Utility2 do
   end
 
   # Efficient count using subqueries - avoids loading full data
-  defp get_counts(repo, module, base_query, filtered_query, cache_ttl) do
-    total_count = repo.aggregate(from(q in subquery(base_query)), :count, :id)
+  def get_counts(repo, module, base_query, filtered_query, cache_ttl) do
+    total_count =
+      if module ==
+           Module.concat([
+             Application.get_env(:blue_potion, :otp_app),
+             "Settings",
+             "DeviceTimeLog"
+           ]) do
+        999
+      else
+        repo.aggregate(from(q in subquery(base_query)), :count, :id)
+      end
 
     # Only compute filtered count if there are search conditions
     filtered_count =

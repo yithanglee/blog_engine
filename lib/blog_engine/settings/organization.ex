@@ -14,6 +14,8 @@ defmodule BlogEngine.Settings.Organization do
     field(:name, :string)
     field(:phone, :string)
     field(:reg_no, :string)
+    field(:mkey, :string)
+    field(:mcode, :string)
     has_many(:outlets, BlogEngine.Settings.Outlet)
 
     timestamps()
@@ -24,6 +26,8 @@ defmodule BlogEngine.Settings.Organization do
     organization
     |> cast(attrs, [
       :name,
+      :mkey,
+      :mcode,
       :desc,
       :address,
       :email,
