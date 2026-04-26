@@ -24,6 +24,7 @@ defmodule BlogEngine.Settings.Sale do
      offline
      online
      topup
+     cash
     )
   )
 
