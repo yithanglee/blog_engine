@@ -1,6 +1,8 @@
 defmodule BlogEngineWeb.ApiController do
   use BlogEngineWeb, :controller
 
+  import Ecto.Query, only: [from: 2]
+
   alias BlogEngine.{Repo, Settings}
   require Logger
   require IEx
@@ -1459,9 +1461,90 @@ defmodule BlogEngineWeb.ApiController do
     end
   end
 
+  defp delete_user_data_for_member(%BlogEngine.Settings.User{id: user_id} = user)
+       when is_integer(user_id) and user_id > 0 do
+    import Ecto.Query, only: [from: 2]
+
+    alias BlogEngine.Settings.{Sale, SalesItem, UserTopup, UserTopupTransaction}
+
+    Repo.transaction(fn ->
+      sale_ids =
+        Repo.all(
+          from(s in Sale,
+            where: s.user_id == ^user_id,
+            select: s.id
+          )
+        )
+
+      if sale_ids != [] do
+        Repo.delete_all(from(si in SalesItem, where: si.sales_id in ^sale_ids))
+      end
+
+      Repo.delete_all(from(utx in UserTopupTransaction, where: utx.user_id == ^user_id))
+      Repo.delete_all(from(ut in UserTopup, where: ut.user_id == ^user_id))
+      Repo.delete_all(from(s in Sale, where: s.user_id == ^user_id))
+
+      case Settings.delete_user(user) do
+        {:ok, _} -> :ok
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+    |> case do
+      {:ok, :ok} ->
+        %{status: "ok"}
+
+      {:error, reason} ->
+        Logger.error("delete_user_data failed: #{inspect(reason)}")
+        %{status: "error", message: "Could not delete user data"}
+    end
+  end
+
+  defp delete_user_data_for_member(_), do: %{status: "error", message: "Invalid user"}
+
   def post(conn, params) do
     res =
       case params["scope"] do
+        "delete_user_data" ->
+          session = params["user_token"] |> BlogEngine.Settings.get_cookie_user_by_cookie()
+
+          case session do
+            %{user: %BlogEngine.Settings.User{} = u} ->
+              delete_user_data_for_member(u)
+
+            _ ->
+              %{status: "error", message: "Unauthorized"}
+          end
+
+        "delete_user_data_by_email_phone" ->
+          email = params["email"] |> to_string() |> String.trim()
+          phone = params["phone"] |> to_string() |> String.trim()
+          phone_digits = String.replace(phone, ~r/\D/, "")
+
+          cond do
+            email == "" or phone_digits == "" ->
+              %{status: "error", message: "Email and phone are required"}
+
+            true ->
+              user =
+                Repo.one(
+                  from(u in BlogEngine.Settings.User,
+                    where: fragment("LOWER(TRIM(?)) = LOWER(TRIM(?))", u.email, ^email),
+                    where:
+                      fragment(
+                        "regexp_replace(coalesce(?, ''), '[^0-9]', '', 'g') = ?",
+                        u.phone,
+                        ^phone_digits
+                      ),
+                    limit: 1
+                  )
+                )
+
+              case user do
+                %BlogEngine.Settings.User{} = u -> delete_user_data_for_member(u)
+                _ -> %{status: "error", message: "User not found"}
+              end
+          end
+
         "update_outlet_latlng" ->
           session = params["user_token"] |> BlogEngine.Settings.get_cookie_user_by_cookie()
 
