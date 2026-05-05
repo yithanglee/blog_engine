@@ -2223,6 +2223,88 @@ defmodule BlogEngine.Settings do
     end
   end
 
+  @doc """
+  Notifies a member (`User`) via FCM after a staff refund credit, when `fcm_token` is set.
+  Dispatches `fcm_publish/4` in a background task so the webhook responds quickly.
+  """
+  def fcm_notify_member_refund_credited(%User{} = user, amount, transaction_id)
+      when is_number(amount) do
+    token =
+      case user.fcm_token do
+        t when is_binary(t) -> String.trim(t)
+        _ -> ""
+      end
+
+    if token != "" do
+      amt_label =
+        case amount do
+          n when is_integer(n) -> Integer.to_string(n)
+          n when is_float(n) -> :erlang.float_to_binary(n, [:compact, decimals: 2])
+        end
+
+      title = "Refund processed"
+
+      body =
+        "Your refund has been processed and #{amt_label} token(s) credited to your account."
+
+      tid =
+        case transaction_id do
+          id when is_integer(id) -> id
+          _ -> 0
+        end
+
+      Task.start(fn -> fcm_publish(tid, title, body, token) end)
+    end
+
+    :ok
+  end
+
+  @doc """
+  FCM registration tokens for staff in an organization (from `messaging_devices.uuid`).
+  """
+  def list_staff_fcm_tokens_for_organization(organization_id) when is_integer(organization_id) do
+    Repo.all(
+      from md in MessagingDevice,
+        join: s in Staff,
+        on: s.id == md.staff_id,
+        where: s.organization_id == ^organization_id,
+        where: not is_nil(md.uuid),
+        select: md.uuid
+    )
+    |> Enum.filter(fn t -> is_binary(t) and String.trim(t) != "" end)
+    |> Enum.uniq()
+  end
+
+  @doc """
+  Notifies operators (staff with FCM device tokens registered for the org) when a member
+  joins the organization support channel.
+  """
+  def fcm_notify_org_operators_member_joined(organization_id, member_label, member_id \\ 0)
+      when is_integer(organization_id) and is_binary(member_label) do
+    label = String.trim(member_label)
+
+    title = "Member joined support"
+
+    body =
+      if label != "" do
+        "#{label} joined the support room."
+      else
+        "A member joined the support room."
+      end
+
+    mid =
+      case member_id do
+        id when is_integer(id) -> id
+        _ -> 0
+      end
+
+    for token <- list_staff_fcm_tokens_for_organization(organization_id) do
+      Task.start(fn -> fcm_publish(mid, title, body, token) end)
+    end
+
+    :ok
+  end
+
   def update_messaging_device(model, params) do
     MessagingDevice.changeset(model, params) |> Repo.update() |> IO.inspect()
   end
@@ -3325,15 +3407,33 @@ defmodule BlogEngine.Settings do
     end
   end
 
+  defp topup_promo_bonus_map do
+    %{
+      10.0 => 1.0,
+      20.0 => 2.0,
+      50.0 => 5.0,
+      100.0 => 10.0
+    }
+  end
+
+  @doc """
+  JSON-safe tier list for mobile apps (`get_topup_promo_tiers` webhook).
+  Must stay in sync with `topup_promo_bonus_amount/1` used when completing top-up sales.
+  """
+  def topup_promo_tiers_for_api do
+    topup_promo_bonus_map()
+    |> Enum.sort_by(fn {k, _} -> k end)
+    |> Enum.map(fn {rm, bonus} ->
+      %{
+        "rm" => rm |> to_float_2dp() |> :erlang.trunc(),
+        "bonus" => bonus |> to_float_2dp() |> :erlang.trunc()
+      }
+    end)
+  end
+
   defp topup_promo_bonus_amount(paid) when is_number(paid) do
     p = to_float_2dp(paid)
-
-    cond do
-      p == 10.0 -> 1.0
-      p == 20.0 -> 2.0
-      p == 50.0 -> 5.0
-      true -> 0.0
-    end
+    Map.get(topup_promo_bonus_map(), p, 0.0)
   end
 
   defp topup_promo_credit_amount(paid) when is_number(paid) do

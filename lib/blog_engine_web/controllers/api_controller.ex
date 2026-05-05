@@ -229,6 +229,15 @@ defmodule BlogEngineWeb.ApiController do
           timestamp = DateTime.utc_now() |> DateTime.to_unix()
           %{time: timestamp}
 
+        "get_topup_promo_tiers" ->
+          tiers = Settings.topup_promo_tiers_for_api()
+
+          %{
+            status: "ok",
+            tiers: tiers,
+            amounts: Enum.map(tiers, &Map.fetch!(&1, "rm"))
+          }
+
         "pay_service_test" ->
           outlet_item = Settings.get_item!(params["id"]) |> BluePotion.sanitize_struct()
           device = Settings.get_device_by_name(params["device"])
@@ -2544,6 +2553,14 @@ defmodule BlogEngineWeb.ApiController do
                                        remarks: refund_remarks
                                      }) do
                                   {:ok, trx} ->
+                                    Task.start(fn ->
+                                      Settings.fcm_notify_member_refund_credited(
+                                        member,
+                                        amount,
+                                        trx.id
+                                      )
+                                    end)
+
                                     %{
                                       status: "ok",
                                       transaction: trx |> BluePotion.sanitize_struct()

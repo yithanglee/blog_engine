@@ -15,6 +15,7 @@ defmodule BlogEngineWeb.OrganizationChannel do
          {:ok, auth} <- authenticate_token(token),
          true <- authorized_for_org?(auth, org_id) do
       recent = recent_transactions_for_join(auth, org_id)
+      maybe_fcm_notify_operators_member_joined(auth, org_id)
 
       socket =
         socket
@@ -174,6 +175,17 @@ defmodule BlogEngineWeb.OrganizationChannel do
        do: oid == org_id
 
   defp authorized_for_org?(_, _), do: false
+
+  defp maybe_fcm_notify_operators_member_joined({:member, %User{} = u}, org_id)
+       when is_integer(org_id) do
+    label = user_label(u)
+
+    Task.start(fn ->
+      Settings.fcm_notify_org_operators_member_joined(org_id, label, u.id)
+    end)
+  end
+
+  defp maybe_fcm_notify_operators_member_joined(_, _), do: :ok
 
   defp recent_transactions_for_join({:member, %User{id: uid}}, org_id) do
     uid
