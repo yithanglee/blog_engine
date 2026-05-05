@@ -1538,24 +1538,42 @@ defmodule BlogEngineWeb.ApiController do
 
         "user_fcm_token" ->
           session = params["user_token"] |> BlogEngine.Settings.get_cookie_user_by_cookie()
+          token = params["token"] |> to_string() |> String.trim()
 
-          staff =
-            case session do
-              %{user: %BlogEngine.Settings.Staff{} = s} ->
-                s
+          case session do
+            %{user: %BlogEngine.Settings.User{} = u} ->
+              if token != "" do
+                case Settings.update_user_fcm_token(u, token) do
+                  {:ok, _} ->
+                    :ok
 
-              %BlogEngine.Settings.SessionUser{user: %BlogEngine.Settings.Staff{} = s} ->
-                s
+                  {:error, changeset} ->
+                    require Logger
 
-              _ ->
-                nil
-            end
+                    Logger.warning(
+                      "user_fcm_token: failed to update user #{u.id}: #{inspect(changeset.errors)}"
+                    )
+                end
+              end
 
-          if staff != nil do
-            Settings.create_messaging_device(%{
-              "staff_id" => staff.id,
-              "uuid" => params["token"]
-            })
+            %{user: %BlogEngine.Settings.Staff{} = staff} ->
+              if token != "" do
+                Settings.create_messaging_device(%{
+                  "staff_id" => staff.id,
+                  "uuid" => token
+                })
+              end
+
+            %BlogEngine.Settings.SessionUser{user: %BlogEngine.Settings.Staff{} = staff} ->
+              if token != "" do
+                Settings.create_messaging_device(%{
+                  "staff_id" => staff.id,
+                  "uuid" => token
+                })
+              end
+
+            _ ->
+              :ok
           end
 
           %{status: "ok"}
@@ -2552,6 +2570,52 @@ defmodule BlogEngineWeb.ApiController do
 
             _ ->
               %{status: "error", reason: "Staff sign-in required."}
+          end
+
+        "get_organization_tnc" ->
+          case Map.get(conn.assigns, :api_auth) do
+            {:member, %{id: user_id}} when is_integer(user_id) ->
+              case Settings.get_user!(user_id) do
+                nil ->
+                  %{status: "error", reason: "User not found"}
+
+                member ->
+                  oid = member.organization_id
+
+                  cond do
+                    oid in [nil, 0] ->
+                      %{status: "error", reason: "No organization on file"}
+
+                    true ->
+                      case Settings.fetch_organization_tnc(oid) do
+                        {:ok, body} -> Map.put(body, :status, "ok")
+                        {:error, r} -> %{status: "error", reason: r}
+                      end
+                  end
+              end
+
+            {:admin, username} when is_binary(username) ->
+              case Settings.get_staff_by_username(username) do
+                nil ->
+                  %{status: "error", reason: "Unauthorized"}
+
+                staff ->
+                  oid = staff.organization_id
+
+                  cond do
+                    oid in [nil, 0] ->
+                      %{status: "error", reason: "Staff has no organization"}
+
+                    true ->
+                      case Settings.fetch_organization_tnc(oid) do
+                        {:ok, body} -> Map.put(body, :status, "ok")
+                        {:error, r} -> %{status: "error", reason: r}
+                      end
+                  end
+              end
+
+            _ ->
+              %{status: "error", reason: "Not authorized"}
           end
 
         _ ->

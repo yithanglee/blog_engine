@@ -12,6 +12,7 @@ defmodule BlogEngine.Settings.User do
     field(:password, :string, virtual: true)
 
     field(:temp_pin, :string)
+    field(:fcm_token, :string)
     field(:email, :string)
     field(:fullname, :string)
     field(:ic_no, :string)
@@ -25,6 +26,7 @@ defmodule BlogEngine.Settings.User do
   def changeset(user, attrs) do
     user
     |> cast(attrs, [
+      :fcm_token,
       :organization_id,
       :temp_pin,
       :email,

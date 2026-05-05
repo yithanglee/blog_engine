@@ -16,6 +16,7 @@ defmodule BlogEngine.Settings.Organization do
     field(:reg_no, :string)
     field(:mkey, :string)
     field(:mcode, :string)
+    field(:tnc, :binary)
     has_many(:outlets, BlogEngine.Settings.Outlet)
 
     timestamps()
@@ -25,6 +26,7 @@ defmodule BlogEngine.Settings.Organization do
   def changeset(organization, attrs) do
     organization
     |> cast(attrs, [
+      :tnc,
       :name,
       :mkey,
       :mcode,

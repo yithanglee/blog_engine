@@ -49,23 +49,32 @@ defmodule BlogEngineWeb.OrganizationChannel do
   @doc """
   Staff-only: load recent `user_topup_transactions` for a member in the same organization
   (for support / refund context).
+
+  Pass `query` (username or phone as the member knows it) and/or legacy `user_id`.
+  Non-empty `query` is preferred over `user_id`.
   """
-  def handle_in("member_support_context", %{"user_id" => raw_uid}, socket) do
+  def handle_in("member_support_context", params, socket) when is_map(params) do
     case socket.assigns.auth do
-      {:staff, %Staff{} = staff} ->
+      {:staff, %Staff{}} ->
         org_id = socket.assigns.organization_id
 
         with true <- is_integer(org_id),
-             {:ok, user_id} <- parse_member_user_id(raw_uid),
-             %User{} = member <- Settings.get_user!(user_id),
-             true <- member.organization_id == org_id,
-             true <- staff.organization_id == org_id do
+             {:ok, %User{} = member} <- resolve_support_member(params, org_id) do
           txs =
-            Settings.list_recent_user_topup_transactions(user_id, org_id, 20)
+            member.id
+            |> Settings.list_recent_user_topup_transactions(org_id, 20)
             |> Enum.map(&transaction_json/1)
 
-          {:reply, {:ok, %{transactions: txs}}, socket}
+          {:reply,
+           {:ok,
+            %{
+              transactions: txs,
+              member: member_support_summary(member)
+            }}, socket}
         else
+          {:error, :ambiguous} ->
+            {:reply, {:error, %{reason: "ambiguous_member"}}, socket}
+
           _ ->
             {:reply, {:error, %{reason: "not_found_or_forbidden"}}, socket}
         end
@@ -76,7 +85,45 @@ defmodule BlogEngineWeb.OrganizationChannel do
   end
 
   def handle_in("member_support_context", _, socket),
-    do: {:reply, {:error, %{reason: "user_id required"}}, socket}
+    do: {:reply, {:error, %{reason: "query_or_user_id_required"}}, socket}
+
+  defp resolve_support_member(params, org_id) do
+    q =
+      case param_get(params, "query") do
+        s when is_binary(s) -> String.trim(s)
+        _ -> ""
+      end
+
+    cond do
+      q != "" ->
+        Settings.resolve_org_member_by_username_or_phone(org_id, q)
+
+      true ->
+        case param_get(params, "user_id") do
+          nil ->
+            {:error, :not_found}
+
+          raw ->
+            with {:ok, uid} <- parse_member_user_id(raw),
+                 %User{organization_id: ^org_id} = u <- Settings.get_user!(uid) do
+              {:ok, u}
+            else
+              _ -> {:error, :not_found}
+            end
+        end
+    end
+  end
+
+  defp param_get(params, key) when is_map(params), do: Map.get(params, key)
+
+  defp member_support_summary(%User{} = u) do
+    %{
+      id: u.id,
+      username: u.username,
+      phone: u.phone,
+      fullname: u.fullname
+    }
+  end
 
   defp parse_member_user_id(v) when is_integer(v) and v > 0, do: {:ok, v}
 

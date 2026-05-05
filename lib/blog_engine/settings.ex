@@ -37,6 +37,32 @@ defmodule BlogEngine.Settings do
     Repo.get!(Organization, id)
   end
 
+  @doc """
+  Loads `tnc` for an organization. Valid UTF-8 bytes are returned as a string; otherwise Base64
+  so the payload is JSON-safe.
+  """
+  def fetch_organization_tnc(organization_id) when is_integer(organization_id) do
+    case Repo.get(Organization, organization_id) do
+      nil ->
+        {:error, "Organization not found"}
+
+      %Organization{tnc: tnc} ->
+        tnc_out =
+          case tnc do
+            nil ->
+              nil
+
+            <<>> ->
+              nil
+
+            bin when is_binary(bin) ->
+              if String.valid?(bin), do: bin, else: Base.encode64(bin)
+          end
+
+        {:ok, %{tnc: tnc_out}}
+    end
+  end
+
   def create_organization(params \\ %{}) do
     Organization.changeset(%Organization{}, params) |> Repo.insert() |> IO.inspect()
   end
@@ -771,6 +797,16 @@ defmodule BlogEngine.Settings do
     end
   end
 
+  @doc """
+  Persists only `fcm_token` on a consumer `User`.
+  Does not rotate the member session (unlike `update_user/2`, which calls `member_token/1`).
+  """
+  def update_user_fcm_token(%User{} = user, token) when is_binary(token) do
+    user
+    |> User.changeset(%{"fcm_token" => token})
+    |> Repo.update()
+  end
+
   def update_user(model, attrs) do
     attrs =
       with true <- "password" in Map.keys(attrs),
@@ -815,6 +851,75 @@ defmodule BlogEngine.Settings do
 
   def get_user_by_username(username) do
     Repo.get_by(User, username: username)
+  end
+
+  @doc """
+  Resolves a consumer `User` in `organization_id` for staff support lookup.
+
+  Tries case-insensitive exact `username` match first, then full match on `phone` after
+  stripping non-digits from both sides (minimum 6 digits in the query).
+
+  Returns `{:ok, %User{}}`, `{:error, :not_found}`, or `{:error, :ambiguous}` when several
+  members share the same normalized phone.
+  """
+  def resolve_org_member_by_username_or_phone(organization_id, query)
+      when is_integer(organization_id) and is_binary(query) do
+    q = String.trim(query)
+
+    cond do
+      q == "" ->
+        {:error, :not_found}
+
+      true ->
+        case repo_one_org_member_by_username_ci(organization_id, q) do
+          %User{} = u -> {:ok, u}
+          nil -> resolve_org_member_by_phone_digits(organization_id, q)
+        end
+    end
+  end
+
+  def resolve_org_member_by_username_or_phone(_, _), do: {:error, :not_found}
+
+  defp repo_one_org_member_by_username_ci(organization_id, q) do
+    Repo.one(
+      from(u in User,
+        where: u.organization_id == ^organization_id,
+        where: fragment("LOWER(TRIM(?)) = LOWER(TRIM(?))", u.username, ^q)
+      )
+    )
+  end
+
+  defp resolve_org_member_by_phone_digits(organization_id, q) when is_binary(q) do
+    digits = normalize_member_phone_digits(q)
+
+    cond do
+      digits == "" or byte_size(digits) < 6 ->
+        {:error, :not_found}
+
+      true ->
+        matches =
+          Repo.all(
+            from(u in User,
+              where: u.organization_id == ^organization_id,
+              where:
+                fragment(
+                  "regexp_replace(coalesce(?, ''), '[^0-9]', '', 'g') = ?",
+                  u.phone,
+                  ^digits
+                )
+            )
+          )
+
+        case matches do
+          [] -> {:error, :not_found}
+          [%User{} = u] -> {:ok, u}
+          _ -> {:error, :ambiguous}
+        end
+    end
+  end
+
+  defp normalize_member_phone_digits(str) when is_binary(str) do
+    String.replace(str, ~r/\D/, "")
   end
 
   @doc """
