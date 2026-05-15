@@ -1829,7 +1829,9 @@ defmodule BlogEngineWeb.ApiController do
                 user ->
                   code = (:rand.uniform(899_999) + 100_000) |> Integer.to_string()
                   pid = password_reset_pin_store_ensure_pid()
-                  expires_at = DateTime.utc_now() |> DateTime.add(600, :second) |> DateTime.to_unix()
+
+                  expires_at =
+                    DateTime.utc_now() |> DateTime.add(600, :second) |> DateTime.to_unix()
 
                   Agent.update(pid, fn state ->
                     Map.put(
@@ -1918,7 +1920,10 @@ defmodule BlogEngineWeb.ApiController do
                     attempts >= 5 ->
                       Agent.update(pid, fn state -> Map.delete(state, email) end)
 
-                      %{status: "error", reason: "Too many incorrect attempts. Request a new code."}
+                      %{
+                        status: "error",
+                        reason: "Too many incorrect attempts. Request a new code."
+                      }
 
                     code == pin ->
                       Agent.update(pid, fn state -> Map.delete(state, email) end)
@@ -2106,7 +2111,9 @@ defmodule BlogEngineWeb.ApiController do
             "scope" => "end_user_create_sale",
             "user_id" => 3
           }
+
           organization = Settings.get_organization!(params["organization_id"])
+
           url =
             Razer.payment_page(
               "fpx",
@@ -2673,49 +2680,9 @@ defmodule BlogEngineWeb.ApiController do
           end
 
         "get_organization_tnc" ->
-          case Map.get(conn.assigns, :api_auth) do
-            {:member, %{id: user_id}} when is_integer(user_id) ->
-              case Settings.get_user!(user_id) do
-                nil ->
-                  %{status: "error", reason: "User not found"}
-
-                member ->
-                  oid = member.organization_id
-
-                  cond do
-                    oid in [nil, 0] ->
-                      %{status: "error", reason: "No organization on file"}
-
-                    true ->
-                      case Settings.fetch_organization_tnc(oid) do
-                        {:ok, body} -> Map.put(body, :status, "ok")
-                        {:error, r} -> %{status: "error", reason: r}
-                      end
-                  end
-              end
-
-            {:admin, username} when is_binary(username) ->
-              case Settings.get_staff_by_username(username) do
-                nil ->
-                  %{status: "error", reason: "Unauthorized"}
-
-                staff ->
-                  oid = staff.organization_id
-
-                  cond do
-                    oid in [nil, 0] ->
-                      %{status: "error", reason: "Staff has no organization"}
-
-                    true ->
-                      case Settings.fetch_organization_tnc(oid) do
-                        {:ok, body} -> Map.put(body, :status, "ok")
-                        {:error, r} -> %{status: "error", reason: r}
-                      end
-                  end
-              end
-
-            _ ->
-              %{status: "error", reason: "Not authorized"}
+          case Settings.fetch_organization_tnc(params["organization_id"]) do
+            {:ok, body} -> Map.put(body, :status, "ok")
+            {:error, r} -> %{status: "error", reason: r}
           end
 
         _ ->

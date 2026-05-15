@@ -63,6 +63,7 @@ defmodule BlogEngine.ApiAuthorization do
     if conn.method == "POST" || conn.method == "OPTIONS" do
       cond do
         conn.params["scope"] in [
+          "get_organization_tnc",
           "forgot_password_request",
           "list_organizations",
           "send_email_pin",
