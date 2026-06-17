@@ -242,6 +242,45 @@ defmodule BlogEngine.Fcm do
   defp parse_invalidate_token("none"), do: :none
   defp parse_invalidate_token(_), do: :none
 
+  @doc """
+  Dynamically starts or restarts a Goth service account profile and updates the Application environment.
+  """
+  def start_or_restart_profile(profile_key) when is_binary(profile_key) do
+    base = accounts_dir()
+    path = Path.join([base, profile_key, @service_account_filename])
+
+    case load_profile(profile_key, path) do
+      {:ok, ^profile_key, profile, child} ->
+        # Update Application env
+        profiles =
+          Application.get_env(:blog_engine, :fcm_profiles, %{})
+          |> Map.put(profile_key, profile)
+
+        Application.put_env(:blog_engine, :fcm_profiles, profiles)
+
+        # Start or restart supervisor child
+        goth = goth_name(profile_key)
+        case Supervisor.start_child(BlogEngine.Supervisor, child) do
+          {:ok, _pid} ->
+            :ok
+
+          {:error, {:already_started, _pid}} ->
+            # Terminate and restart the child to pick up the new credentials
+            Supervisor.terminate_child(BlogEngine.Supervisor, goth)
+            Supervisor.restart_child(BlogEngine.Supervisor, goth)
+            :ok
+
+          other ->
+            Logger.warning("Failed to start Goth child for #{profile_key}: #{inspect(other)}")
+            other
+        end
+
+      {:error, reason} ->
+        Logger.warning("Failed to load FCM profile #{inspect(profile_key)} for restart: #{reason}")
+        {:error, reason}
+    end
+  end
+
   defp profile(profile_key) do
     Application.get_env(:blog_engine, :fcm_profiles, %{})
     |> Map.get(profile_key)

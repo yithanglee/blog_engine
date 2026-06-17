@@ -81,9 +81,16 @@ defmodule BlogEngine.Settings do
               |> String.replace(~r/[^a-z0-9_-]/, "")
 
             if profile_name != "" do
-              dest_dir = Path.join([Application.app_dir(:blog_engine), "priv/static/firebase", profile_name])
+              dest_dir =
+                Path.join([
+                  Application.app_dir(:blog_engine),
+                  "priv/static/firebase",
+                  profile_name
+                ])
+
               File.mkdir_p!(dest_dir)
               File.cp!(media_path, Path.join(dest_dir, "service-account.json"))
+              BlogEngine.Fcm.start_or_restart_profile(profile_name)
             end
           end
         end
@@ -514,7 +521,10 @@ defmodule BlogEngine.Settings do
             user = user |> Repo.preload([:organization])
             issue_member_session(user)
 
-          match?(%BlogEngine.Settings.Staff{}, staff = Repo.get(BlogEngine.Settings.Staff, user_id)) ->
+          match?(
+            %BlogEngine.Settings.Staff{},
+            staff = Repo.get(BlogEngine.Settings.Staff, user_id)
+          ) ->
             staff = staff |> Repo.preload([:organization, role: :app_routes])
             issue_staff_session(staff)
 
@@ -2282,6 +2292,9 @@ defmodule BlogEngine.Settings do
   @doc """
   Notifies a member (`User`) via FCM after a staff refund credit, when `fcm_token` is set.
   Dispatches `fcm_publish/4` in a background task so the webhook responds quickly.
+
+  user =  BlogEngine.Settings.get_user!(3)
+  BlogEngine.Settings.fcm_notify_member_refund_credited(user, 1, 3)
   """
   def fcm_notify_member_refund_credited(%User{} = user, amount, transaction_id)
       when is_number(amount) do
@@ -2300,8 +2313,7 @@ defmodule BlogEngine.Settings do
 
       title = "Refund processed"
 
-      body =
-        "Your refund has been processed and #{amt_label} token(s) credited to your account."
+      body = "Your refund has been processed and #{amt_label} token(s) credited to your account."
 
       tid =
         case transaction_id do
@@ -2312,6 +2324,10 @@ defmodule BlogEngine.Settings do
       member_profile =
         Application.get_env(:blog_engine, :fcm, [])
         |> Keyword.get(:member_profile, "hub")
+
+      member_profile = get_fcm_profile_by_org_id(user.organization_id)
+
+      # if get hub, should fail
 
       Task.start(fn -> fcm_publish(tid, title, body, token, profile: member_profile) end)
     end
@@ -2324,12 +2340,13 @@ defmodule BlogEngine.Settings do
   """
   def list_staff_fcm_tokens_for_organization(organization_id) when is_integer(organization_id) do
     Repo.all(
-      from md in MessagingDevice,
+      from(md in MessagingDevice,
         join: s in Staff,
         on: s.id == md.staff_id,
         where: s.organization_id == ^organization_id,
         where: not is_nil(md.uuid),
         select: md.uuid
+      )
     )
     |> Enum.filter(fn t -> is_binary(t) and String.trim(t) != "" end)
     |> Enum.uniq()
@@ -2396,7 +2413,7 @@ defmodule BlogEngine.Settings do
     title = "Customer Top-up"
     body = "#{user_lbl} has successfully topped up RM #{amount}."
 
-    profile = get_fcm_profile_by_org_id(organization_id)
+    profile = get_fcm_profile_by_org_id(organization_id) |> IO.inspect(label: "profile")
 
     for token <- list_staff_fcm_tokens_for_organization(organization_id) do
       Task.start(fn -> fcm_publish(0, title, body, token, profile: profile) end)
@@ -3457,6 +3474,7 @@ defmodule BlogEngine.Settings do
   def get_user_topup_by_user_and_organization(user_id, organization_id)
       when is_integer(user_id) and is_integer(organization_id) do
     Repo.get_by(UserTopup, user_id: user_id, organization_id: organization_id)
+    |> IO.inspect(label: "UTPUT")
   end
 
   def get_user_topup_by_user_and_organization(_, _), do: nil
@@ -3516,12 +3534,7 @@ defmodule BlogEngine.Settings do
   end
 
   defp topup_promo_bonus_map do
-    %{
-      10.0 => 1.0,
-      20.0 => 2.0,
-      50.0 => 5.0,
-      100.0 => 10.0
-    }
+    %{1.0 => 0.0, 10.0 => 1.0, 20.0 => 2.0, 50.0 => 5.0, 100.0 => 10.0}
   end
 
   @doc """
@@ -3629,8 +3642,13 @@ defmodule BlogEngine.Settings do
         trx = Map.get(multi_res, :user_topup_transaction)
 
         if trx.amount > 0 do
+          trx = Repo.preload(trx, :organization)
+
+          # organization = BlogEngine.Settings.get_user_topup_transaction!() |> BlogEngine.Repo.preload(:organization) |> Map.get(:organization)
+          organization = trx |> Map.get(:organization)
+
           Task.start(fn ->
-            fcm_notify_org_operators_topup(trx.organization_id, trx.user_id, trx.amount)
+            fcm_notify_org_operators_topup(organization.id, trx.user_id, trx.amount)
           end)
         end
 
