@@ -2336,6 +2336,23 @@ defmodule BlogEngine.Settings do
   end
 
   @doc """
+  Resolves the FCM profile key for an organization based on its normalized/slugified name.
+  """
+  def get_fcm_profile_by_org_id(org_id) when is_integer(org_id) do
+    case Repo.get(Organization, org_id) do
+      %Organization{name: name} when is_binary(name) ->
+        name
+        |> String.downcase()
+        |> String.replace(~r/[^a-z0-9_-]/, "")
+
+      _ ->
+        "main"
+    end
+  end
+
+  def get_fcm_profile_by_org_id(_), do: "main"
+
+  @doc """
   Notifies operators (staff with FCM device tokens registered for the org) when a member
   joins the organization support channel.
   """
@@ -2358,11 +2375,42 @@ defmodule BlogEngine.Settings do
         _ -> 0
       end
 
+    profile = get_fcm_profile_by_org_id(organization_id)
+
     for token <- list_staff_fcm_tokens_for_organization(organization_id) do
-      Task.start(fn -> fcm_publish(mid, title, body, token) end)
+      Task.start(fn -> fcm_publish(mid, title, body, token, profile: profile) end)
     end
 
     :ok
+  end
+
+  @doc """
+  Notifies operators (staff with FCM device tokens registered for the org) when a member
+  makes a top-up payment.
+  """
+  def fcm_notify_org_operators_topup(organization_id, user_id, amount)
+      when is_integer(organization_id) and is_integer(user_id) do
+    user = get_user!(user_id)
+    user_lbl = user_label(user)
+
+    title = "Customer Top-up"
+    body = "#{user_lbl} has successfully topped up RM #{amount}."
+
+    profile = get_fcm_profile_by_org_id(organization_id)
+
+    for token <- list_staff_fcm_tokens_for_organization(organization_id) do
+      Task.start(fn -> fcm_publish(0, title, body, token, profile: profile) end)
+    end
+
+    :ok
+  end
+
+  defp user_label(%User{fullname: n, username: u}) do
+    cond do
+      is_binary(n) and String.trim(n) != "" -> n
+      is_binary(u) and String.trim(u) != "" -> u
+      true -> "Member"
+    end
   end
 
   def update_messaging_device(model, params) do
@@ -3578,7 +3626,15 @@ defmodule BlogEngine.Settings do
     |> IO.inspect()
     |> case do
       {:ok, multi_res} ->
-        {:ok, multi_res |> Map.get(:user_topup_transaction)}
+        trx = Map.get(multi_res, :user_topup_transaction)
+
+        if trx.amount > 0 do
+          Task.start(fn ->
+            fcm_notify_org_operators_topup(trx.organization_id, trx.user_id, trx.amount)
+          end)
+        end
+
+        {:ok, trx}
 
       {:error, _step, failed_val, _changes} ->
         {:error, failed_val}

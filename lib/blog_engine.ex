@@ -20,7 +20,8 @@ defmodule BlogEngine do
           left_join: md in Settings.MessagingDevice,
           on: md.staff_id == s.id,
           where: r.name in ^["Owner", "Admin", "admin"],
-          select: md.uuid
+          where: not is_nil(md.uuid),
+          select: %{uuid: md.uuid, organization_id: s.organization_id}
         )
       )
       |> IO.inspect(label: "admins")
@@ -37,11 +38,11 @@ defmodule BlogEngine do
           left_join: md in Settings.MessagingDevice,
           on: md.staff_id == s.id,
           where: d.is_active == true,
-          select: %{id: d.id, label: d.label, outlet_name: o.name, uuid: md.uuid}
+          select: %{id: d.id, label: d.label, outlet_name: o.name, uuid: md.uuid, organization_id: d.organization_id}
         )
       )
 
-    for %{id: id, label: label, outlet_name: outlet_name, uuid: uuid} <- device_ids do
+    for %{id: id, label: label, outlet_name: outlet_name, uuid: uuid, organization_id: org_id} <- device_ids do
       timestamp = DateTime.utc_now() |> DateTime.add(8 * 60 * 60) |> DateTime.to_iso8601()
 
       case DeviceTracker.get_last_online(id) do
@@ -50,21 +51,25 @@ defmodule BlogEngine do
           diff = DateTime.utc_now() |> DateTime.diff(last_online)
 
           if diff > 120 && diff < 2 * 60 * 60 do
-            # todo: findd the device outlet organization user's messaging device,
-            # and create the notification on the browser
+            profile = BlogEngine.Settings.get_fcm_profile_by_org_id(org_id)
+
             Elixir.Task.start_link(BlogEngine.Settings, :fcm_publish, [
               0,
               "Device Online Checker",
               "#{outlet_name}'s #{label} is not online. Checked #{timestamp} ",
-              uuid
+              uuid,
+              [profile: profile]
             ])
 
-            for admin_uuid <- admins do
+            for %{uuid: admin_uuid, organization_id: admin_org_id} <- admins do
+              admin_profile = BlogEngine.Settings.get_fcm_profile_by_org_id(admin_org_id)
+
               Elixir.Task.start_link(BlogEngine.Settings, :fcm_publish, [
                 0,
                 "Device Online Checker",
                 "#{outlet_name}'s #{label} is not online. Checked #{timestamp}",
-                admin_uuid
+                admin_uuid,
+                [profile: admin_profile]
               ])
             end
           end
