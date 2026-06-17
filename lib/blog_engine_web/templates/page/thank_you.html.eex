@@ -26,15 +26,24 @@
   </div>
 </div>
 <script type="text/javascript">
-  
-
   setTimeout(() => {
     try {
+      const status = "<%= @conn.params["status"] %>" === "00" ? "success" : "failed";
+      const tranID = "<%= @conn.params["tranID"] %>";
       
-      window.close();
-    } catch(e){
-      window.location  = "https://iot.djtech4u.com/?d=&location="
+      // Redirect to smartconnect deep link first
+      window.location.href = "smartconnect://payment/confirmation?result=" + status + "&ref_no=" + tranID;
 
+      // Fallback: close the browser after a short delay if deep linking is not handled/installed
+      setTimeout(() => {
+        try {
+          window.close();
+        } catch(e) {
+          window.location = "https://iot.djtech4u.com/?d=&location=";
+        }
+      }, 1500);
+    } catch(e) {
+      window.location = "https://iot.djtech4u.com/?d=&location=";
     }
-  }, 2000)
+  }, 2000);
 </script>
