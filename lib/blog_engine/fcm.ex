@@ -184,7 +184,7 @@ defmodule BlogEngine.Fcm do
       invalidate_token: invalidate_token
     }
 
-    child = {Goth, name: goth, source: source}
+    child = Supervisor.child_spec({Goth, name: goth, source: source}, id: goth)
     {profile_key, profile, child}
   end
 
