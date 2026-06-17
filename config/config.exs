@@ -10,6 +10,11 @@ use Mix.Config
 config :blog_engine,
   ecto_repos: [BlogEngine.Repo]
 
+# FCM profile keys match folder names under priv/static/firebase/<profile>/
+config :blog_engine, :fcm,
+  default_profile: "main",
+  member_profile: System.get_env("FCM_MEMBER_PROFILE") || "hub"
+
 # Configures the endpoint
 config :blog_engine, BlogEngineWeb.Endpoint,
   url: [host: "localhost"],

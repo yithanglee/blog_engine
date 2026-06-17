@@ -4,6 +4,7 @@ defmodule BlogEngine.Settings.Organization do
 
   schema "organizations" do
     field(:address, :string)
+    field(:service_account_url, :string)
     field(:bank_acc_no, :string)
     field(:bank_holder_name, :string)
     field(:bank_name, :string)
@@ -26,6 +27,7 @@ defmodule BlogEngine.Settings.Organization do
   def changeset(organization, attrs) do
     organization
     |> cast(attrs, [
+      :service_account_url,
       :tnc,
       :name,
       :mkey,

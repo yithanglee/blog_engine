@@ -10,27 +10,25 @@ defmodule BlogEngine.Application do
       config: %{metadata: [:file, :line]}
     })
 
-    source =
-      {:service_account,
-       File.read!("#{Application.app_dir(:blog_engine) <> "/priv/static"}/service-account.json")
-       |> Jason.decode!()}
-      |> IO.inspect()
+    {fcm_profiles, fcm_goth_children} = BlogEngine.Fcm.boot()
+    Application.put_env(:blog_engine, :fcm_profiles, fcm_profiles)
 
-    children = [
-      {Goth, name: BlogEngine.Goth, source: source},
-      # {BlogEngine.Queue, []},
-      BlogEngine.Repo,
-      # Start the Telemetry supervisor
-      BlogEngineWeb.Telemetry,
-      # Start the PubSub system
-      {Phoenix.PubSub, name: BlogEngine.PubSub},
-      # Start the Endpoint (http/https)
-      BlogEngineWeb.Endpoint,
-      BlogEngine.Scheduler,
-      {Cachex, name: :device_blocked_cache}
-      # Start a worker by calling: BlogEngine.Worker.start_link(arg)
-      # {BlogEngine.Worker, arg}
-    ]
+    children =
+      fcm_goth_children ++
+        [
+          # {BlogEngine.Queue, []},
+          BlogEngine.Repo,
+          # Start the Telemetry supervisor
+          BlogEngineWeb.Telemetry,
+          # Start the PubSub system
+          {Phoenix.PubSub, name: BlogEngine.PubSub},
+          # Start the Endpoint (http/https)
+          BlogEngineWeb.Endpoint,
+          BlogEngine.Scheduler,
+          {Cachex, name: :device_blocked_cache}
+          # Start a worker by calling: BlogEngine.Worker.start_link(arg)
+          # {BlogEngine.Worker, arg}
+        ]
 
     {:ok, pid} = Agent.start_link(fn -> %{} end)
     Process.register(pid, :kv)

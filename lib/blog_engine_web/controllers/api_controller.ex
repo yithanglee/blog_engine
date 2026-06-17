@@ -557,6 +557,30 @@ defmodule BlogEngineWeb.ApiController do
               other |> BluePotion.sanitize_struct()
           end
 
+        "refresh_session" ->
+          case Settings.refresh_session_by_cookie(params["cookie"]) do
+            {:ok, %{cookie: c, user: u, refreshed: refreshed}} ->
+              role_app_routes =
+                case u do
+                  %Settings.Staff{role: %{app_routes: routes}} when is_list(routes) ->
+                    Enum.map(routes, &BluePotion.sanitize_struct/1)
+
+                  _ ->
+                    []
+                end
+
+              %{
+                status: "ok",
+                cookie: c,
+                user: u |> BluePotion.sanitize_struct(),
+                refreshed: refreshed,
+                role_app_routes: role_app_routes
+              }
+
+            {:error, _} ->
+              %{status: "error", reason: "Session expired"}
+          end
+
         "announcements" ->
           Settings.list_announcements() |> Enum.map(&(&1 |> BluePotion.sanitize_struct()))
 

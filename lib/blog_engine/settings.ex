@@ -68,7 +68,31 @@ defmodule BlogEngine.Settings do
   end
 
   def update_organization(model, params) do
-    Organization.changeset(model, params) |> Repo.update() |> IO.inspect()
+    case Organization.changeset(model, params) |> Repo.update() do
+      {:ok, organization} = res ->
+        if url = organization.service_account_url do
+          filename = Path.basename(url)
+          media_path = Path.join([File.cwd!(), "media", filename])
+
+          if File.exists?(media_path) do
+            profile_name =
+              organization.name
+              |> String.downcase()
+              |> String.replace(~r/[^a-z0-9_-]/, "")
+
+            if profile_name != "" do
+              dest_dir = Path.join([Application.app_dir(:blog_engine), "priv/static/firebase", profile_name])
+              File.mkdir_p!(dest_dir)
+              File.cp!(media_path, Path.join(dest_dir, "service-account.json"))
+            end
+          end
+        end
+
+        res
+
+      other ->
+        other
+    end
   end
 
   def delete_organization(%Organization{} = model) do
@@ -430,6 +454,98 @@ defmodule BlogEngine.Settings do
   end
 
   def get_cookie_user_by_cookie(_), do: nil
+
+  @session_refresh_max_age 60 * 60 * 24 * 365
+
+  @doc """
+  Re-issues a session token when the current one has expired but is still within
+  the refresh window (matches client cookie lifetime). Returns `{:error, :expired}`
+  when the session cannot be recovered.
+  """
+  def refresh_session_by_cookie(cookie) when is_binary(cookie) and cookie != "" do
+    case get_cookie_user_by_cookie(cookie) do
+      %{cookie: c, user: u} ->
+        {:ok, %{cookie: c, user: u, refreshed: false}}
+
+      _ ->
+        refresh_expired_session(cookie)
+    end
+  end
+
+  def refresh_session_by_cookie(_), do: {:error, :expired}
+
+  defp refresh_expired_session(cookie) do
+    case Phoenix.Token.verify(
+           BlogEngineWeb.Endpoint,
+           "member_signature",
+           cookie,
+           max_age: @session_refresh_max_age
+         ) do
+      {:ok, %{id: id}} ->
+        case Repo.get(BlogEngine.Settings.User, id) |> Repo.preload([:organization]) do
+          %BlogEngine.Settings.User{} = user -> issue_member_session(user)
+          _ -> try_session_user_row(cookie)
+        end
+
+      {:error, _} ->
+        case Phoenix.Token.verify(
+               BlogEngineWeb.Endpoint,
+               "admin_signature",
+               cookie,
+               max_age: @session_refresh_max_age
+             ) do
+          {:ok, username} when is_binary(username) ->
+            case get_staff_by_username(username) do
+              staff when not is_nil(staff) -> issue_staff_session(staff)
+              _ -> try_session_user_row(cookie)
+            end
+
+          {:error, _} ->
+            try_session_user_row(cookie)
+        end
+    end
+  end
+
+  defp try_session_user_row(cookie) do
+    case Repo.one(from(s in SessionUser, where: s.cookie == ^cookie)) do
+      %SessionUser{user_id: user_id} ->
+        cond do
+          match?(%BlogEngine.Settings.User{}, user = Repo.get(BlogEngine.Settings.User, user_id)) ->
+            user = user |> Repo.preload([:organization])
+            issue_member_session(user)
+
+          match?(%BlogEngine.Settings.Staff{}, staff = Repo.get(BlogEngine.Settings.Staff, user_id)) ->
+            staff = staff |> Repo.preload([:organization, role: :app_routes])
+            issue_staff_session(staff)
+
+          true ->
+            {:error, :expired}
+        end
+
+      _ ->
+        {:error, :expired}
+    end
+  end
+
+  defp issue_member_session(%BlogEngine.Settings.User{} = user) do
+    token = member_token(user.id)
+    create_session_user(%{"cookie" => token, "user_id" => user.id})
+    {:ok, %{cookie: token, user: user, refreshed: true}}
+  end
+
+  defp issue_staff_session(%BlogEngine.Settings.Staff{} = staff) do
+    staff = Repo.preload(staff, [:organization, role: :app_routes])
+
+    token =
+      Phoenix.Token.sign(
+        BlogEngineWeb.Endpoint,
+        "admin_signature",
+        staff.username
+      )
+
+    create_session_user(%{"cookie" => token, "user_id" => staff.id})
+    {:ok, %{cookie: token, user: staff, refreshed: true}}
+  end
 
   def list_session_users() do
     Repo.all(SessionUser)
@@ -2152,75 +2268,15 @@ defmodule BlogEngine.Settings do
         id,
         title,
         body,
-        device_token \\ "cXh-Hxbk88EuxnkpTuDySj:APA91bGZombjdutaWzQomruMWYclBo1JGnhg_V6fGAuZ5_RIrFzrWXDx_qnTC2_q66RJJUuFhV-I3V2RtQD7ffStOq8xuT19fejsNNj0kR-isS5qcE_5JKQ"
+        device_token \\ "cXh-Hxbk88EuxnkpTuDySj:APA91bGZombjdutaWzQomruMWYclBo1JGnhg_V6fGAuZ5_RIrFzrWXDx_qnTC2_q66RJJUuFhV-I3V2RtQD7ffStOq8xuT19fejsNNj0kR-isS5qcE_5JKQ",
+        opts \\ []
       ) do
-    access_token = Goth.fetch!(BlogEngine.Goth).token
+    default_profile =
+      Application.get_env(:blog_engine, :fcm, [])
+      |> Keyword.get(:default_profile, "main")
 
-    if device_token != nil do
-      message = %{
-        "message" => %{
-          "token" => device_token,
-          "notification" => %{
-            "title" => title,
-            "body" => body
-          },
-          "data" => %{
-            "id" => "#{id}",
-            "path" => "orders",
-            "created_at" => Date.utc_today(),
-            "click_action" => "FLUTTER_NOTIFICATION_CLICK"
-          }
-        }
-      }
-
-      # todo, check the error, then delete the access token
-      test_message = %{
-        "message" => %{
-          "token" =>
-            "dROnDZkGQPm4357TH__VXI:APA91bEpRxZL7bY-piD5jhfqZ-Ce0BIfDlB1EMyioNnv_29mcC9XdoVXKhM9GBI132m2HzUMCiuliDdMcHcW7FBBwcYHw3CFbVNKLt63469zhsq5tFBtM7o",
-          "notification" => %{
-            "title" => "Salam Dari DJTECH",
-            "body" => "Anda boleh periksa keadaan mesin dari sini2"
-          },
-          "data" => %{
-            "id" => "0",
-            "path" => "orders",
-            "created_at" => Date.utc_today(),
-            "click_action" => "FLUTTER_NOTIFICATION_CLICK"
-          }
-        }
-      }
-
-      res =
-        HTTPoison.post(
-          "https://fcm.googleapis.com/v1/projects/djtech-655dd/messages:send",
-          message |> Jason.encode!(),
-          [
-            {"content-type", "application/json"},
-            {"Authorization", "Bearer #{access_token}"}
-          ]
-        )
-
-      case res do
-        {:ok, %HTTPoison.Response{body: body}} ->
-          keys = Jason.decode!(body) |> Map.keys()
-
-          if "error" in keys do
-            if device_token != nil do
-              Repo.delete_all(
-                from(md in BlogEngine.Settings.MessagingDevice, where: md.uuid == ^device_token)
-              )
-            else
-              IO.inspect("no device token, #{body}")
-            end
-          end
-
-        _ ->
-          nil
-      end
-    else
-      IO.inspect("no device token, #{body}")
-    end
+    profile = Keyword.get(opts, :profile, default_profile)
+    BlogEngine.Fcm.publish(profile, id, title, body, device_token)
   end
 
   @doc """
@@ -2253,7 +2309,11 @@ defmodule BlogEngine.Settings do
           _ -> 0
         end
 
-      Task.start(fn -> fcm_publish(tid, title, body, token) end)
+      member_profile =
+        Application.get_env(:blog_engine, :fcm, [])
+        |> Keyword.get(:member_profile, "hub")
+
+      Task.start(fn -> fcm_publish(tid, title, body, token, profile: member_profile) end)
     end
 
     :ok
