@@ -2,6 +2,7 @@ defmodule BlogEngine.Fcm do
   @moduledoc false
 
   import Ecto.Query, warn: false
+  require Logger
 
   alias BlogEngine.Repo
   alias BlogEngine.Settings.MessagingDevice
@@ -49,8 +50,13 @@ defmodule BlogEngine.Fcm do
       if Map.has_key?(profiles, @required_profile) or not File.exists?(legacy_main_path) do
         {profiles, children}
       else
-        {profile_key, profile, child} = load_profile(@required_profile, legacy_main_path)
-        {Map.put(profiles, profile_key, profile), children ++ [child]}
+        case load_profile(@required_profile, legacy_main_path) do
+          {:ok, profile_key, profile, child} ->
+            {Map.put(profiles, profile_key, profile), children ++ [child]}
+          {:error, reason} ->
+            Logger.warning("Skipping legacy required FCM profile: #{reason}")
+            {profiles, children}
+        end
       end
 
     if not Map.has_key?(profiles, @required_profile) do
@@ -78,8 +84,6 @@ defmodule BlogEngine.Fcm do
     else
       case profile(profile_key) do
         nil ->
-          require Logger
-
           Logger.warning(
             "FCM profile #{inspect(profile_key)} is not configured (missing service account folder)"
           )
@@ -157,9 +161,15 @@ defmodule BlogEngine.Fcm do
       |> File.ls!()
       |> Enum.filter(&valid_profile_folder?/1)
       |> Enum.sort()
-      |> Enum.map(fn profile_key ->
+      |> Enum.flat_map(fn profile_key ->
         path = Path.join([base, profile_key, @service_account_filename])
-        load_profile(profile_key, path)
+        case load_profile(profile_key, path) do
+          {:ok, profile_key, profile, child} ->
+            [{profile_key, profile, child}]
+          {:error, reason} ->
+            Logger.warning("Skipping FCM profile #{inspect(profile_key)}: #{reason}")
+            []
+        end
       end)
     else
       []
@@ -172,20 +182,34 @@ defmodule BlogEngine.Fcm do
   end
 
   defp load_profile(profile_key, service_account_path) do
-    json = service_account_path |> File.read!() |> Jason.decode!()
-    source = {:service_account, json}
-    project_id = json["project_id"]
-    goth = goth_name(profile_key)
-    invalidate_token = read_invalidate_token(profile_key)
+    case File.read(service_account_path) do
+      {:ok, content} ->
+        case Jason.decode(content) do
+          {:ok, %{"client_email" => _, "private_key" => _} = json} ->
+            source = {:service_account, json}
+            project_id = json["project_id"]
+            goth = goth_name(profile_key)
+            invalidate_token = read_invalidate_token(profile_key)
 
-    profile = %{
-      goth: goth,
-      project_id: project_id,
-      invalidate_token: invalidate_token
-    }
+            profile = %{
+              goth: goth,
+              project_id: project_id,
+              invalidate_token: invalidate_token
+            }
 
-    child = Supervisor.child_spec({Goth, name: goth, source: source}, id: goth)
-    {profile_key, profile, child}
+            child = Supervisor.child_spec({Goth, name: goth, source: source}, id: goth)
+            {:ok, profile_key, profile, child}
+
+          {:ok, _other_json} ->
+            {:error, "invalid service account JSON structure (missing client_email or private_key)"}
+
+          {:error, err} ->
+            {:error, "failed to decode JSON: #{inspect(err)}"}
+        end
+
+      {:error, err} ->
+        {:error, "failed to read file: #{inspect(err)}"}
+    end
   end
 
   defp goth_name(profile_key) do
