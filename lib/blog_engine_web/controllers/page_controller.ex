@@ -303,7 +303,8 @@ defmodule BlogEngineWeb.PageController do
       "domain" => "djtechplt_Dev",
       "error_code" => "",
       "error_desc" => "",
-      "extraP" => "{\"DbtrAgt\":\"MBBEMYKL\",\"DbtrAcct_Type\":\"SVGS\",\"TxnType\":\"DOMESTIC\",\"refundability\":\"true\",\"bank_issuer\":\"Maybank Berhad\",\"duitnowqr_indicator\":\"20260417MBBEMYKL030OQR73604100\",\"metadata\":\"[]\"}",
+      "extraP" =>
+        "{\"DbtrAgt\":\"MBBEMYKL\",\"DbtrAcct_Type\":\"SVGS\",\"TxnType\":\"DOMESTIC\",\"refundability\":\"true\",\"bank_issuer\":\"Maybank Berhad\",\"duitnowqr_indicator\":\"20260417MBBEMYKL030OQR73604100\",\"metadata\":\"[]\"}",
       "nbcb" => "2",
       "orderid" => "TOPUP-423",
       "paydate" => "2026-04-17 21:55:18",
@@ -311,8 +312,6 @@ defmodule BlogEngineWeb.PageController do
       "status" => "00",
       "tranID" => "3637513979"
     }
-
-
 
     test_params = %{
       "amount" => "1.00",
@@ -346,6 +345,24 @@ defmodule BlogEngineWeb.PageController do
       "skey" => "510f3836a7422a75a683c97b6ce171ca",
       "status" => "00",
       "tranID" => "2390694614"
+    }
+
+    topup_duitnow = %{
+      "amount" => "1.00",
+      "appcode" => "",
+      "channel" => "RPP_DuitNowQR",
+      "currency" => "RM",
+      "domain" => "djtechplt_Dev",
+      "error_code" => "",
+      "error_desc" => "",
+      "extraP" =>
+        "{\"DbtrAgt\":\"MBBEMYKL\",\"DbtrAcct_Type\":\"SVGS\",\"TxnType\":\"DOMESTIC\",\"refundability\":\"true\",\"bank_issuer\":\"Maybank Berhad\",\"duitnowqr_indicator\":\"20260617MBBEMYKL030OQR70818702\",\"metadata\":\"[]\"}",
+      "nbcb" => "2",
+      "orderid" => "TOPUP-427",
+      "paydate" => "2026-06-17 18:22:31",
+      "skey" => "4835dfb3f35ca29b2dd4b2abff85b533",
+      "status" => "00",
+      "tranID" => "3789155243"
     }
 
     #  BlogEngineWeb.PageController.notification(%Plug.Conn{}, duitnow)
@@ -390,7 +407,7 @@ defmodule BlogEngineWeb.PageController do
       topup_check != nil ->
         topup_sale = topup_check
 
-        if topup_sale.status == :pending_payment do
+        if topup_sale.status == :pending_payment && params["status"] == "00" do
           BlogEngine.Settings.complete_topup(topup_sale)
         end
 
@@ -1079,8 +1096,7 @@ defmodule BlogEngineWeb.PageController do
     IO.inspect("it's reloading!")
     IO.inspect(params, label: "params")
 
-
-    sample =  %{
+    sample = %{
       "amount" => "1.00",
       "appcode" => "",
       "channel" => "RPP_DuitNowQR",
@@ -1088,7 +1104,8 @@ defmodule BlogEngineWeb.PageController do
       "domain" => "djtechplt_Dev",
       "error_code" => "",
       "error_desc" => "",
-      "extraP" => "{\"DbtrAgt\":\"MBBEMYKL\",\"DbtrAcct_Type\":\"SVGS\",\"TxnType\":\"DOMESTIC\",\"refundability\":\"true\",\"bank_issuer\":\"Maybank Berhad\",\"duitnowqr_indicator\":\"20260417MBBEMYKL030OQR73027724\",\"metadata\":\"[]\"}",
+      "extraP" =>
+        "{\"DbtrAgt\":\"MBBEMYKL\",\"DbtrAcct_Type\":\"SVGS\",\"TxnType\":\"DOMESTIC\",\"refundability\":\"true\",\"bank_issuer\":\"Maybank Berhad\",\"duitnowqr_indicator\":\"20260417MBBEMYKL030OQR73027724\",\"metadata\":\"[]\"}",
       "orderid" => "TOPUP-421",
       "paydate" => "2026-04-17 17:35:28",
       "skey" => "6730bd9e50787e212e7345f3f9381534",

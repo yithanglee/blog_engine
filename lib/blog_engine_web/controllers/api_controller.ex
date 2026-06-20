@@ -1653,7 +1653,19 @@ defmodule BlogEngineWeb.ApiController do
           %{status: "ok", res: params}
 
         "user_fcm_token" ->
-          session = params["user_token"] |> BlogEngine.Settings.get_cookie_user_by_cookie()
+          sample = %{
+            "scope" => "user_fcm_token",
+            "token" =>
+              "cRgko7hJQJyupxwevu3oiv:APA91bG0irYbXdnDJ7GW0dRERNaItW4JDfEa4oUqLkotA0Nf70Rk5x1L59NTNafZ5ET75__nOoS-EMd08EqOlxHnmqueU9rOt2f8WCBy5ISaVdGkEfOJdGs",
+            "user_token" =>
+              "SFMyNTY.g2gDdAAAAAFkAAJpZGEDbgYAvscv1J4BYgABUYA.faXLah_K20C9Nii5_Y9yEMxT9N1X5xY_daJZz1eKqgY"
+          }
+
+          session =
+            params["user_token"]
+            |> BlogEngine.Settings.get_cookie_user_by_cookie()
+            |> IO.inspect(label: "session")
+
           token = params["token"] |> to_string() |> String.trim()
 
           case session do

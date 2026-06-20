@@ -53,6 +53,7 @@ defmodule BlogEngine.Fcm do
         case load_profile(@required_profile, legacy_main_path) do
           {:ok, profile_key, profile, child} ->
             {Map.put(profiles, profile_key, profile), children ++ [child]}
+
           {:error, reason} ->
             Logger.warning("Skipping legacy required FCM profile: #{reason}")
             {profiles, children}
@@ -82,7 +83,7 @@ defmodule BlogEngine.Fcm do
     if token == "" do
       :ok
     else
-      case profile(profile_key) do
+      case profile(profile_key) |> IO.inspect(label: "fcm publish") do
         nil ->
           Logger.warning(
             "FCM profile #{inspect(profile_key)} is not configured (missing service account folder)"
@@ -118,7 +119,8 @@ defmodule BlogEngine.Fcm do
                    {"content-type", "application/json"},
                    {"Authorization", "Bearer #{access_token}"}
                  ]
-               ) do
+               )
+               |> IO.inspect(label: "goth request") do
             {:ok, %HTTPoison.Response{body: response_body}} ->
               keys = Jason.decode!(response_body) |> Map.keys()
 
@@ -163,9 +165,11 @@ defmodule BlogEngine.Fcm do
       |> Enum.sort()
       |> Enum.flat_map(fn profile_key ->
         path = Path.join([base, profile_key, @service_account_filename])
+
         case load_profile(profile_key, path) do
           {:ok, profile_key, profile, child} ->
             [{profile_key, profile, child}]
+
           {:error, reason} ->
             Logger.warning("Skipping FCM profile #{inspect(profile_key)}: #{reason}")
             []
@@ -201,7 +205,8 @@ defmodule BlogEngine.Fcm do
             {:ok, profile_key, profile, child}
 
           {:ok, _other_json} ->
-            {:error, "invalid service account JSON structure (missing client_email or private_key)"}
+            {:error,
+             "invalid service account JSON structure (missing client_email or private_key)"}
 
           {:error, err} ->
             {:error, "failed to decode JSON: #{inspect(err)}"}
@@ -260,6 +265,7 @@ defmodule BlogEngine.Fcm do
 
         # Start or restart supervisor child
         goth = goth_name(profile_key)
+
         case Supervisor.start_child(BlogEngine.Supervisor, child) do
           {:ok, _pid} ->
             :ok
@@ -276,7 +282,10 @@ defmodule BlogEngine.Fcm do
         end
 
       {:error, reason} ->
-        Logger.warning("Failed to load FCM profile #{inspect(profile_key)} for restart: #{reason}")
+        Logger.warning(
+          "Failed to load FCM profile #{inspect(profile_key)} for restart: #{reason}"
+        )
+
         {:error, reason}
     end
   end

@@ -2325,7 +2325,8 @@ defmodule BlogEngine.Settings do
         Application.get_env(:blog_engine, :fcm, [])
         |> Keyword.get(:member_profile, "hub")
 
-      member_profile = get_fcm_profile_by_org_id(user.organization_id)
+      member_profile =
+        get_fcm_profile_by_org_id(user.organization_id) |> IO.inspect(label: "member profle")
 
       # if get hub, should fail
 
