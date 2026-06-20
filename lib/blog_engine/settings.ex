@@ -3535,7 +3535,7 @@ defmodule BlogEngine.Settings do
   end
 
   defp topup_promo_bonus_map do
-    %{1.0 => 0.0, 10.0 => 1.0, 20.0 => 2.0, 50.0 => 5.0, 100.0 => 10.0}
+    %{10.0 => 1.0, 20.0 => 2.0, 50.0 => 5.0, 100.0 => 10.0}
   end
 
   @doc """
