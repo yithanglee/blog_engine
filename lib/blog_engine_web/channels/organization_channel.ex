@@ -6,7 +6,7 @@ defmodule BlogEngineWeb.OrganizationChannel do
   use BlogEngineWeb, :channel
 
   alias BlogEngine.Settings
-  alias BlogEngine.Settings.{Staff, User, UserTopupTransaction}
+  alias BlogEngine.Settings.{OrganizationChatMessage, Staff, User, UserTopupTransaction}
 
   @impl true
   def join("organization:" <> org_id_str, %{"token" => token}, socket)
@@ -15,6 +15,7 @@ defmodule BlogEngineWeb.OrganizationChannel do
          {:ok, auth} <- authenticate_token(token),
          true <- authorized_for_org?(auth, org_id) do
       recent = recent_transactions_for_join(auth, org_id)
+      messages = recent_chat_messages_for_join(org_id)
       maybe_fcm_notify_operators_member_joined(auth, org_id)
 
       socket =
@@ -22,7 +23,7 @@ defmodule BlogEngineWeb.OrganizationChannel do
         |> assign(:organization_id, org_id)
         |> assign(:auth, auth)
 
-      {:ok, %{recent_transactions: recent}, socket}
+      {:ok, %{recent_transactions: recent, messages: messages}, socket}
     else
       _ -> {:error, %{reason: "unauthorized"}}
     end
@@ -35,11 +36,34 @@ defmodule BlogEngineWeb.OrganizationChannel do
     trimmed = String.trim(body)
 
     if trimmed != "" do
-      broadcast(socket, "chat_message", %{
+      org_id = socket.assigns.organization_id
+      auth = socket.assigns.auth
+      sender = format_sender(auth)
+
+      attrs = %{
+        organization_id: org_id,
         body: trimmed,
-        sender: format_sender(socket.assigns.auth),
-        at: DateTime.utc_now() |> DateTime.to_iso8601()
-      })
+        sender_role: sender[:role],
+        sender_label: sender[:label],
+        user_id: sender[:user_id],
+        staff_id: sender[:staff_id]
+      }
+
+      case Settings.create_organization_chat_message(attrs) do
+        {:ok, msg} ->
+          broadcast(socket, "chat_message", %{
+            body: msg.body,
+            sender: sender,
+            at: datetime_to_iso(msg.inserted_at)
+          })
+
+        _ ->
+          broadcast(socket, "chat_message", %{
+            body: trimmed,
+            sender: sender,
+            at: DateTime.utc_now() |> DateTime.to_iso8601()
+          })
+      end
     end
 
     {:noreply, socket}
@@ -195,6 +219,55 @@ defmodule BlogEngineWeb.OrganizationChannel do
 
   defp recent_transactions_for_join({:staff, _}, _org_id), do: []
 
+  defp recent_chat_messages_for_join(org_id) do
+    org_id
+    |> Settings.list_recent_organization_chat_messages(100)
+    |> Enum.map(&format_chat_message_json/1)
+  end
+
+  defp format_chat_message_json(%OrganizationChatMessage{} = m) do
+    %{
+      body: m.body,
+      sender: format_sender_from_db_message(m),
+      at: datetime_to_iso(m.inserted_at)
+    }
+  end
+
+  defp format_sender_from_db_message(%OrganizationChatMessage{sender_role: "member", user: %User{} = u} = m) do
+    %{
+      role: "member",
+      label: m.sender_label || user_label(u),
+      user_id: m.user_id,
+      username: u.username,
+      phone: u.phone
+    }
+  end
+
+  defp format_sender_from_db_message(%OrganizationChatMessage{sender_role: "member"} = m) do
+    %{
+      role: "member",
+      label: m.sender_label || "Member",
+      user_id: m.user_id
+    }
+  end
+
+  defp format_sender_from_db_message(%OrganizationChatMessage{sender_role: "staff", staff: %Staff{} = s} = m) do
+    %{
+      role: "staff",
+      label: m.sender_label || staff_label(s),
+      staff_id: m.staff_id
+    }
+  end
+
+  defp format_sender_from_db_message(%OrganizationChatMessage{} = m) do
+    %{
+      role: m.sender_role || "participant",
+      label: m.sender_label || "Participant",
+      user_id: m.user_id,
+      staff_id: m.staff_id
+    }
+  end
+
   defp transaction_json(%UserTopupTransaction{} = t) do
     %{
       id: t.id,
@@ -213,11 +286,21 @@ defmodule BlogEngineWeb.OrganizationChannel do
   defp datetime_to_iso(_), do: nil
 
   defp format_sender({:member, %User{} = u}) do
-    %{role: "member", label: user_label(u), user_id: u.id}
+    %{
+      role: "member",
+      label: user_label(u),
+      user_id: u.id,
+      username: u.username,
+      phone: u.phone
+    }
   end
 
   defp format_sender({:staff, %Staff{} = s}) do
-    %{role: "staff", label: staff_label(s), staff_id: s.id}
+    %{
+      role: "staff",
+      label: staff_label(s),
+      staff_id: s.id
+    }
   end
 
   defp user_label(%User{fullname: n, username: u}) do
@@ -236,3 +319,4 @@ defmodule BlogEngineWeb.OrganizationChannel do
     end
   end
 end
+
