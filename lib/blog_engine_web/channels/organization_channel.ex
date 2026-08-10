@@ -15,7 +15,7 @@ defmodule BlogEngineWeb.OrganizationChannel do
          {:ok, auth} <- authenticate_token(token),
          true <- authorized_for_org?(auth, org_id) do
       recent = recent_transactions_for_join(auth, org_id)
-      messages = recent_chat_messages_for_join(org_id)
+      messages = recent_chat_messages_for_join(org_id, auth)
       maybe_fcm_notify_operators_member_joined(auth, org_id)
 
       socket =
@@ -219,9 +219,40 @@ defmodule BlogEngineWeb.OrganizationChannel do
 
   defp recent_transactions_for_join({:staff, _}, _org_id), do: []
 
-  defp recent_chat_messages_for_join(org_id) do
+  intercept ["chat_message"]
+
+  @impl true
+  def handle_out("chat_message", payload, socket) do
+    case socket.assigns.auth do
+      {:staff, _} ->
+        push(socket, "chat_message", payload)
+        {:noreply, socket}
+
+      {:member, %User{id: uid}} ->
+        sender = Map.get(payload, :sender) || Map.get(payload, "sender") || %{}
+        role = Map.get(sender, :role) || Map.get(sender, "role")
+        sender_uid = Map.get(sender, :user_id) || Map.get(sender, "user_id")
+
+        if role == "staff" or sender_uid == uid do
+          push(socket, "chat_message", payload)
+        end
+
+        {:noreply, socket}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  defp recent_chat_messages_for_join(org_id, {:staff, _}) do
     org_id
     |> Settings.list_recent_organization_chat_messages(100)
+    |> Enum.map(&format_chat_message_json/1)
+  end
+
+  defp recent_chat_messages_for_join(org_id, {:member, %User{id: uid}}) do
+    org_id
+    |> Settings.list_recent_organization_chat_messages_for_member(uid, 100)
     |> Enum.map(&format_chat_message_json/1)
   end
 

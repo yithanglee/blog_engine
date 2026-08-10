@@ -3914,6 +3914,20 @@ defmodule BlogEngine.Settings do
     |> Repo.all()
   end
 
+  @doc """
+  Returns recent chat messages for a specific member and staff responses in an organization ordered chronologically.
+  """
+  def list_recent_organization_chat_messages_for_member(organization_id, user_id, limit \\ 100)
+      when is_integer(organization_id) and is_integer(user_id) and is_integer(limit) do
+    from(m in OrganizationChatMessage,
+      where: m.organization_id == ^organization_id and (m.user_id == ^user_id or m.sender_role == "staff"),
+      order_by: [asc: m.inserted_at, asc: m.id],
+      limit: ^limit,
+      preload: [:user, :staff]
+    )
+    |> Repo.all()
+  end
+
   def create_organization_chat_message(attrs \\ %{}) do
     OrganizationChatMessage.changeset(%OrganizationChatMessage{}, attrs)
     |> Repo.insert()
