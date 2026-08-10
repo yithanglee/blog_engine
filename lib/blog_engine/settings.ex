@@ -3928,6 +3928,42 @@ defmodule BlogEngine.Settings do
     |> Repo.all()
   end
 
+  @doc """
+  Returns a map of %{user_id => unread_count} for pending member messages in an organization.
+  """
+  def get_org_unread_chat_counts(organization_id) when is_integer(organization_id) do
+    messages =
+      from(m in OrganizationChatMessage,
+        where: m.organization_id == ^organization_id and not is_nil(m.user_id),
+        order_by: [asc: m.inserted_at, asc: m.id],
+        select: %{user_id: m.user_id, sender_role: m.sender_role, inserted_at: m.inserted_at}
+      )
+      |> Repo.all()
+
+    messages
+    |> Enum.group_by(& &1.user_id)
+    |> Enum.reduce(%{}, fn {user_id, user_msgs}, acc ->
+      last_staff_idx = Enum.find_index(Enum.reverse(user_msgs), &(&1.sender_role == "staff"))
+
+      unread =
+        case last_staff_idx do
+          nil ->
+            Enum.count(user_msgs, &(&1.sender_role == "member"))
+
+          idx ->
+            Enum.reverse(user_msgs)
+            |> Enum.take(idx)
+            |> Enum.count(&(&1.sender_role == "member"))
+        end
+
+      if unread > 0 do
+        Map.put(acc, user_id, unread)
+      else
+        acc
+      end
+    end)
+  end
+
   def create_organization_chat_message(attrs \\ %{}) do
     OrganizationChatMessage.changeset(%OrganizationChatMessage{}, attrs)
     |> Repo.insert()

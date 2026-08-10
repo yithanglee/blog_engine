@@ -23,6 +23,7 @@ defmodule BlogEngineWeb.OrganizationChannel do
 
       recent = recent_transactions_for_join(auth, org_id)
       messages = recent_chat_messages_for_join(org_id, chat_user_id, auth)
+      unread_counts = Settings.get_org_unread_chat_counts(org_id)
       maybe_fcm_notify_operators_member_joined(auth, org_id)
 
       socket =
@@ -31,7 +32,7 @@ defmodule BlogEngineWeb.OrganizationChannel do
         |> assign(:chat_user_id, chat_user_id)
         |> assign(:auth, auth)
 
-      {:ok, %{recent_transactions: recent, messages: messages}, socket}
+      {:ok, %{recent_transactions: recent, messages: messages, unread_counts: unread_counts}, socket}
     else
       _ -> {:error, %{reason: "unauthorized"}}
     end
@@ -62,17 +63,23 @@ defmodule BlogEngineWeb.OrganizationChannel do
 
       case Settings.create_organization_chat_message(attrs) do
         {:ok, msg} ->
+          unread_counts = Settings.get_org_unread_chat_counts(org_id)
+
           broadcast(socket, "chat_message", %{
             body: msg.body,
             sender: sender,
-            at: datetime_to_iso(msg.inserted_at)
+            at: datetime_to_iso(msg.inserted_at),
+            unread_counts: unread_counts
           })
 
         _ ->
+          unread_counts = Settings.get_org_unread_chat_counts(org_id)
+
           broadcast(socket, "chat_message", %{
             body: trimmed,
             sender: sender,
-            at: DateTime.utc_now() |> DateTime.to_iso8601()
+            at: DateTime.utc_now() |> DateTime.to_iso8601(),
+            unread_counts: unread_counts
           })
       end
     end
