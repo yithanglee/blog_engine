@@ -3776,7 +3776,7 @@ defmodule BlogEngineWeb.ApiController do
       BlogEngine.Settings.create_device_log(%{
         device_id: device_db_id,
         uuid: params["uuid"] || Ecto.UUID.generate(),
-        remarks: "HTTP polling task completed: #{params["task_type"] || "unknown"}"
+        remarks: "HTTP polling task completed: #{params["reps"] || "unknown"}"
       })
     end
 
