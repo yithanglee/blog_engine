@@ -204,14 +204,41 @@ defmodule BlogEngineWeb.OrganizationChannel do
       _ ->
         case Settings.decode_admin_token(token) do
           username when is_binary(username) ->
-            case Settings.get_staff_by_username(username) do
-              nil -> :error
-              %Staff{} = s -> {:ok, {:staff, s}}
-            end
+            find_staff_by_username(username)
+
+          %{username: username} when is_binary(username) ->
+            find_staff_by_username(username)
+
+          %{"username" => username} when is_binary(username) ->
+            find_staff_by_username(username)
+
+          %{id: staff_id} when is_integer(staff_id) ->
+            find_staff_by_id(staff_id)
+
+          %{"id" => staff_id} when is_integer(staff_id) ->
+            find_staff_by_id(staff_id)
 
           _ ->
             :error
         end
+    end
+  end
+
+  defp find_staff_by_username(username) do
+    case Settings.get_staff_by_username(username) do
+      nil -> :error
+      %Staff{} = s -> {:ok, {:staff, s}}
+    end
+  end
+
+  defp find_staff_by_id(staff_id) do
+    try do
+      case Settings.get_staff!(staff_id) do
+        nil -> :error
+        %Staff{} = s -> {:ok, {:staff, s}}
+      end
+    catch
+      _, _ -> :error
     end
   end
 
