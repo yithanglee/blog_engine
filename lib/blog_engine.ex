@@ -38,20 +38,29 @@ defmodule BlogEngine do
           left_join: md in Settings.MessagingDevice,
           on: md.staff_id == s.id,
           where: d.is_active == true,
-          select: %{id: d.id, label: d.label, outlet_name: o.name, uuid: md.uuid, organization_id: d.organization_id}
+          select: %{
+            id: d.id,
+            label: d.label,
+            outlet_name: o.name,
+            uuid: md.uuid,
+            organization_id: d.organization_id
+          }
         )
       )
+      |> IO.inspect(label: "devices")
 
-    for %{id: id, label: label, outlet_name: outlet_name, uuid: uuid, organization_id: org_id} <- device_ids do
+    for %{id: id, label: label, outlet_name: outlet_name, uuid: uuid, organization_id: org_id} <-
+          device_ids do
       timestamp = DateTime.utc_now() |> DateTime.add(8 * 60 * 60) |> DateTime.to_iso8601()
 
       case DeviceTracker.get_last_online(id) do
         {:ok, last_online} ->
           nil
-          diff = DateTime.utc_now() |> DateTime.diff(last_online)
+          diff = DateTime.utc_now() |> DateTime.diff(last_online) |> IO.inspect(label: "diff")
 
-          if diff > 120 && diff < 2 * 60 * 60 do
+          if true do
             profile = BlogEngine.Settings.get_fcm_profile_by_org_id(org_id)
+            IO.inspect(uuid, label: "uuid")
 
             Elixir.Task.start_link(BlogEngine.Settings, :fcm_publish, [
               0,
@@ -77,6 +86,7 @@ defmodule BlogEngine do
           diff
 
         _ ->
+          IO.inspect("no notification")
           nil
       end
     end

@@ -3535,7 +3535,7 @@ defmodule BlogEngine.Settings do
   end
 
   defp topup_promo_bonus_map do
-    %{1.0 => 0.0, 10.0 => 1.0, 20.0 => 2.0, 50.0 => 5.0, 100.0 => 10.0}
+    %{10.0 => 1.0, 20.0 => 2.0, 50.0 => 5.0, 100.0 => 10.0}
   end
 
   @doc """
@@ -3897,4 +3897,26 @@ defmodule BlogEngine.Settings do
     end
     |> IO.inspect(label: "summar")
   end
+
+  alias BlogEngine.Settings.OrganizationChatMessage
+
+  @doc """
+  Returns recent chat messages for an organization ordered chronologically.
+  """
+  def list_recent_organization_chat_messages(organization_id, limit \\ 100)
+      when is_integer(organization_id) and is_integer(limit) do
+    from(m in OrganizationChatMessage,
+      where: m.organization_id == ^organization_id,
+      order_by: [asc: m.inserted_at, asc: m.id],
+      limit: ^limit,
+      preload: [:user, :staff]
+    )
+    |> Repo.all()
+  end
+
+  def create_organization_chat_message(attrs \\ %{}) do
+    OrganizationChatMessage.changeset(%OrganizationChatMessage{}, attrs)
+    |> Repo.insert()
+  end
 end
+
