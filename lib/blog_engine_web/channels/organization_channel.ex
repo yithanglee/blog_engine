@@ -61,6 +61,12 @@ defmodule BlogEngineWeb.OrganizationChannel do
         staff_id: sender[:staff_id]
       }
 
+      if sender[:role] == "member" and is_integer(db_user_id) do
+        Task.start(fn ->
+          Settings.fcm_notify_org_operators_member_chat(org_id, db_user_id, trimmed)
+        end)
+      end
+
       case Settings.create_organization_chat_message(attrs) do
         {:ok, msg} ->
           unread_counts = Settings.get_org_unread_chat_counts(org_id)

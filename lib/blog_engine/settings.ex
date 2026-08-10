@@ -2423,6 +2423,27 @@ defmodule BlogEngine.Settings do
     :ok
   end
 
+  @doc """
+  Notifies operators (staff with FCM device tokens registered for the org) when a member
+  sends a new chat message in support.
+  """
+  def fcm_notify_org_operators_member_chat(organization_id, user_id, message_body)
+      when is_integer(organization_id) and is_integer(user_id) do
+    user = get_user!(user_id)
+    user_lbl = if user, do: user_label(user), else: "Member ##{user_id}"
+
+    title = "Chat from #{user_lbl}"
+    body = if is_binary(message_body), do: String.slice(String.trim(message_body), 0, 100), else: "New message"
+
+    profile = get_fcm_profile_by_org_id(organization_id)
+
+    for token <- list_staff_fcm_tokens_for_organization(organization_id) do
+      Task.start(fn -> fcm_publish(user_id, title, body, token, profile: profile) end)
+    end
+
+    :ok
+  end
+
   defp user_label(%User{fullname: n, username: u}) do
     cond do
       is_binary(n) and String.trim(n) != "" -> n
