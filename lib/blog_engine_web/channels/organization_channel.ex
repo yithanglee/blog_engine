@@ -9,18 +9,26 @@ defmodule BlogEngineWeb.OrganizationChannel do
   alias BlogEngine.Settings.{OrganizationChatMessage, Staff, User, UserTopupTransaction}
 
   @impl true
-  def join("organization:" <> org_id_str, %{"token" => token}, socket)
+  def join("organization:" <> topic_str, %{"token" => token}, socket)
       when is_binary(token) and token != "" do
-    with {:ok, org_id} <- parse_org_id(org_id_str),
+    with {:ok, org_id, target_user_id} <- parse_topic(topic_str),
          {:ok, auth} <- authenticate_token(token),
-         true <- authorized_for_org?(auth, org_id) do
+         true <- authorized_for_topic?(auth, org_id, target_user_id) do
+      chat_user_id =
+        target_user_id ||
+          case auth do
+            {:member, %User{id: uid}} -> uid
+            _ -> nil
+          end
+
       recent = recent_transactions_for_join(auth, org_id)
-      messages = recent_chat_messages_for_join(org_id, auth)
+      messages = recent_chat_messages_for_join(org_id, chat_user_id, auth)
       maybe_fcm_notify_operators_member_joined(auth, org_id)
 
       socket =
         socket
         |> assign(:organization_id, org_id)
+        |> assign(:chat_user_id, chat_user_id)
         |> assign(:auth, auth)
 
       {:ok, %{recent_transactions: recent, messages: messages}, socket}
@@ -37,15 +45,18 @@ defmodule BlogEngineWeb.OrganizationChannel do
 
     if trimmed != "" do
       org_id = socket.assigns.organization_id
+      chat_user_id = Map.get(socket.assigns, :chat_user_id)
       auth = socket.assigns.auth
       sender = format_sender(auth)
+
+      db_user_id = sender[:user_id] || chat_user_id
 
       attrs = %{
         organization_id: org_id,
         body: trimmed,
         sender_role: sender[:role],
         sender_label: sender[:label],
-        user_id: sender[:user_id],
+        user_id: db_user_id,
         staff_id: sender[:staff_id]
       }
 
@@ -161,10 +172,24 @@ defmodule BlogEngineWeb.OrganizationChannel do
 
   defp parse_member_user_id(_), do: :error
 
-  defp parse_org_id(str) do
-    case Integer.parse(str) do
-      {n, ""} -> {:ok, n}
-      _ -> :error
+  defp parse_topic(topic_str) do
+    case String.split(topic_str, "_") do
+      [org_str, user_str] ->
+        with {org_id, ""} <- Integer.parse(org_str),
+             {user_id, ""} <- Integer.parse(user_str) do
+          {:ok, org_id, user_id}
+        else
+          _ -> :error
+        end
+
+      [org_str] ->
+        case Integer.parse(org_str) do
+          {org_id, ""} -> {:ok, org_id, nil}
+          _ -> :error
+        end
+
+      _ ->
+        :error
     end
   end
 
@@ -190,15 +215,20 @@ defmodule BlogEngineWeb.OrganizationChannel do
     end
   end
 
-  defp authorized_for_org?({:member, %User{organization_id: oid}}, org_id)
+  defp authorized_for_topic?({:member, %User{id: uid, organization_id: oid}}, org_id, target_user_id)
+       when is_integer(oid) and is_integer(org_id) do
+    cond do
+      oid != org_id -> false
+      target_user_id != nil and target_user_id != uid -> false
+      true -> true
+    end
+  end
+
+  defp authorized_for_topic?({:staff, %Staff{organization_id: oid}}, org_id, _target_user_id)
        when is_integer(oid) and is_integer(org_id),
        do: oid == org_id
 
-  defp authorized_for_org?({:staff, %Staff{organization_id: oid}}, org_id)
-       when is_integer(oid) and is_integer(org_id),
-       do: oid == org_id
-
-  defp authorized_for_org?(_, _), do: false
+  defp authorized_for_topic?(_, _, _), do: false
 
   defp maybe_fcm_notify_operators_member_joined({:member, %User{} = u}, org_id)
        when is_integer(org_id) do
@@ -244,15 +274,15 @@ defmodule BlogEngineWeb.OrganizationChannel do
     end
   end
 
-  defp recent_chat_messages_for_join(org_id, {:staff, _}) do
+  defp recent_chat_messages_for_join(org_id, chat_user_id, _auth) when is_integer(chat_user_id) do
     org_id
-    |> Settings.list_recent_organization_chat_messages(100)
+    |> Settings.list_recent_organization_chat_messages_for_member(chat_user_id, 100)
     |> Enum.map(&format_chat_message_json/1)
   end
 
-  defp recent_chat_messages_for_join(org_id, {:member, %User{id: uid}}) do
+  defp recent_chat_messages_for_join(org_id, nil, {:staff, _}) do
     org_id
-    |> Settings.list_recent_organization_chat_messages_for_member(uid, 100)
+    |> Settings.list_recent_organization_chat_messages(100)
     |> Enum.map(&format_chat_message_json/1)
   end
 
