@@ -58,7 +58,7 @@ defmodule BlogEngine do
           nil
           diff = DateTime.utc_now() |> DateTime.diff(last_online) |> IO.inspect(label: "diff")
 
-          if true do
+          if diff > 300 do
             profile = BlogEngine.Settings.get_fcm_profile_by_org_id(org_id)
             IO.inspect(uuid, label: "uuid")
 
@@ -70,7 +70,7 @@ defmodule BlogEngine do
               [profile: profile]
             ])
 
-            for %{uuid: admin_uuid, organization_id: admin_org_id} <- admins do
+            for %{uuid: admin_uuid, organization_id: admin_org_id} <- admins, admin_org_id == org_id do
               admin_profile = BlogEngine.Settings.get_fcm_profile_by_org_id(admin_org_id)
 
               Elixir.Task.start_link(BlogEngine.Settings, :fcm_publish, [
