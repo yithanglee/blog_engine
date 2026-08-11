@@ -2716,7 +2716,20 @@ defmodule BlogEngineWeb.ApiController do
           end
 
         "get_organization_tnc" ->
-          case Settings.fetch_organization_tnc(params["organization_id"]) do
+          organization_id =
+            if params["organization_id"] == nil do
+              auth_token = Plug.Conn.get_req_header(conn, "authorization") |> List.first()
+              token = auth_token |> String.split("Basic ") |> List.last()
+              t = BlogEngine.Settings.decode_token(token) |> IO.inspect()
+
+              oid = Settings.get_user!(t.id) |> Map.get(:organization_id)
+              oid
+            else
+              oid = params["organization_id"]
+              oid
+            end
+
+          case Settings.fetch_organization_tnc(organization_id) do
             {:ok, body} -> Map.put(body, :status, "ok")
             {:error, r} -> %{status: "error", reason: r}
           end
@@ -2878,8 +2891,12 @@ defmodule BlogEngineWeb.ApiController do
   end
 
   def get_user_profile(conn, _params) do
-    case Map.get(conn.assigns, :api_auth) do
-      {:member, %{id: user_id}} when is_integer(user_id) ->
+    auth_token = Plug.Conn.get_req_header(conn, "authorization") |> List.first()
+    token = auth_token |> String.split("Basic ") |> List.last()
+    t = BlogEngine.Settings.decode_token(token)
+
+    case t do
+      %{id: user_id} when is_integer(user_id) ->
         case Settings.get_user!(user_id) do
           nil ->
             conn
