@@ -104,6 +104,7 @@ defmodule BlogEngine do
 
   def within_operating_hours?(nil, _end_time), do: true
   def within_operating_hours?(_start_time, nil), do: true
+  def within_operating_hours?(same, same), do: true
   def within_operating_hours?(%Time{} = start_time, %Time{} = end_time) do
     now_time = Time.utc_now() |> Time.add(8 * 3600, :second)
 
