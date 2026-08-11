@@ -16,6 +16,8 @@ defmodule BlogEngine.Settings.Outlet do
     field(:collection_id, :string)
     field(:lat, :float)
     field(:lng, :float)
+    field(:operating_hours_start, :time)
+    field(:operating_hours_end, :time)
     belongs_to(:organization, BlogEngine.Settings.Organization)
     field(:price_per_minutes, :float, default: 0.5)
     field(:payment_gateway, :string)
@@ -44,7 +46,9 @@ defmodule BlogEngine.Settings.Outlet do
       :lat,
       :lng,
       :is_blocked,
-      :block_reason
+      :block_reason,
+      :operating_hours_start,
+      :operating_hours_end
     ])
 
     # |> validate_required([:name, :address, :is_blocked, :block_reason])

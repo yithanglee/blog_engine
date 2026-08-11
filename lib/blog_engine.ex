@@ -43,14 +43,23 @@ defmodule BlogEngine do
             label: d.label,
             outlet_name: o.name,
             uuid: md.uuid,
-            organization_id: d.organization_id
+            organization_id: d.organization_id,
+            operating_hours_start: o.operating_hours_start,
+            operating_hours_end: o.operating_hours_end
           }
         )
       )
       |> IO.inspect(label: "devices")
 
-    for %{id: id, label: label, outlet_name: outlet_name, uuid: uuid, organization_id: org_id} <-
-          device_ids do
+    for %{
+          id: id,
+          label: label,
+          outlet_name: outlet_name,
+          uuid: uuid,
+          organization_id: org_id,
+          operating_hours_start: op_start,
+          operating_hours_end: op_end
+        } <- device_ids do
       timestamp = DateTime.utc_now() |> DateTime.add(8 * 60 * 60) |> DateTime.to_iso8601()
 
       case DeviceTracker.get_last_online(id) do
@@ -58,7 +67,8 @@ defmodule BlogEngine do
           nil
           diff = DateTime.utc_now() |> DateTime.diff(last_online) |> IO.inspect(label: "diff")
 
-          if diff > 300 do
+          if diff > 300 and within_operating_hours?(op_start, op_end) and not DeviceTracker.notified_offline?(id) do
+            DeviceTracker.mark_notified_offline(id)
             profile = BlogEngine.Settings.get_fcm_profile_by_org_id(org_id)
             IO.inspect(uuid, label: "uuid")
 
@@ -91,6 +101,19 @@ defmodule BlogEngine do
       end
     end
   end
+
+  def within_operating_hours?(nil, _end_time), do: true
+  def within_operating_hours?(_start_time, nil), do: true
+  def within_operating_hours?(%Time{} = start_time, %Time{} = end_time) do
+    now_time = Time.utc_now() |> Time.add(8 * 3600, :second)
+
+    if Time.compare(start_time, end_time) == :gt do
+      Time.compare(now_time, start_time) in [:gt, :eq] or Time.compare(now_time, end_time) in [:lt, :eq]
+    else
+      Time.compare(now_time, start_time) in [:gt, :eq] and Time.compare(now_time, end_time) in [:lt, :eq]
+    end
+  end
+  def within_operating_hours?(_, _), do: true
 
   def encode_params(params) do
     encode_value = fn tuple ->
