@@ -2423,6 +2423,27 @@ defmodule BlogEngine.Settings do
     :ok
   end
 
+  @doc """
+  Notifies operators (staff with FCM device tokens registered for the org) when a member
+  sends a new chat message in support.
+  """
+  def fcm_notify_org_operators_member_chat(organization_id, user_id, message_body)
+      when is_integer(organization_id) and is_integer(user_id) do
+    user = get_user!(user_id)
+    user_lbl = if user, do: user_label(user), else: "Member ##{user_id}"
+
+    title = "Chat from #{user_lbl}"
+    body = if is_binary(message_body), do: String.slice(String.trim(message_body), 0, 100), else: "New message"
+
+    profile = get_fcm_profile_by_org_id(organization_id)
+
+    for token <- list_staff_fcm_tokens_for_organization(organization_id) do
+      Task.start(fn -> fcm_publish(user_id, title, body, token, profile: profile) end)
+    end
+
+    :ok
+  end
+
   defp user_label(%User{fullname: n, username: u}) do
     cond do
       is_binary(n) and String.trim(n) != "" -> n
@@ -3912,6 +3933,56 @@ defmodule BlogEngine.Settings do
       preload: [:user, :staff]
     )
     |> Repo.all()
+  end
+
+  @doc """
+  Returns recent chat messages for a specific member and staff responses in an organization ordered chronologically.
+  """
+  def list_recent_organization_chat_messages_for_member(organization_id, user_id, limit \\ 100)
+      when is_integer(organization_id) and is_integer(user_id) and is_integer(limit) do
+    from(m in OrganizationChatMessage,
+      where: m.organization_id == ^organization_id and (m.user_id == ^user_id or m.sender_role == "staff"),
+      order_by: [asc: m.inserted_at, asc: m.id],
+      limit: ^limit,
+      preload: [:user, :staff]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns a map of %{user_id => unread_count} for pending member messages in an organization.
+  """
+  def get_org_unread_chat_counts(organization_id) when is_integer(organization_id) do
+    messages =
+      from(m in OrganizationChatMessage,
+        where: m.organization_id == ^organization_id and not is_nil(m.user_id),
+        order_by: [asc: m.inserted_at, asc: m.id],
+        select: %{user_id: m.user_id, sender_role: m.sender_role, inserted_at: m.inserted_at}
+      )
+      |> Repo.all()
+
+    messages
+    |> Enum.group_by(& &1.user_id)
+    |> Enum.reduce(%{}, fn {user_id, user_msgs}, acc ->
+      last_staff_idx = Enum.find_index(Enum.reverse(user_msgs), &(&1.sender_role == "staff"))
+
+      unread =
+        case last_staff_idx do
+          nil ->
+            Enum.count(user_msgs, &(&1.sender_role == "member"))
+
+          idx ->
+            Enum.reverse(user_msgs)
+            |> Enum.take(idx)
+            |> Enum.count(&(&1.sender_role == "member"))
+        end
+
+      if unread > 0 do
+        Map.put(acc, user_id, unread)
+      else
+        acc
+      end
+    end)
   end
 
   def create_organization_chat_message(attrs \\ %{}) do
