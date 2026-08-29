@@ -434,6 +434,24 @@ defmodule BlogEngine.Settings do
         is_banner: false,
         class_list: "col-lg-6 col-12",
         content: "Watch our IoT controller in action with DuitNow QR instantaneous cashless dispensing."
+      },
+      %{
+        order: 3,
+        remarks: "DuitNow QR Token Changer Demo",
+        youtube_url: "https://www.youtube.com/shorts/A6KTbVU_Owg",
+        is_show: true,
+        is_banner: false,
+        class_list: "col-lg-6 col-12",
+        content: "Seamless token changer machine payment integration powered by DuitNow QR."
+      },
+      %{
+        order: 4,
+        remarks: "Instant Dispense & Real-Time Settlement Demo",
+        youtube_url: "https://www.youtube.com/shorts/SVMfPMPQbKA",
+        is_show: true,
+        is_banner: false,
+        class_list: "col-lg-6 col-12",
+        content: "Real-time payment verification and instant relay trigger for automatic dispensing."
       }
     ]
 
