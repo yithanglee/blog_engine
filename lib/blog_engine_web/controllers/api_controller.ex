@@ -4541,11 +4541,13 @@ defmodule BlogEngineWeb.ApiController do
     end_date = params["end_date"]
 
     filename = "sales_export_#{start_date || "all"}_#{end_date || "all"}.csv"
+    IO.inspect(filename, label: "csv filename")
 
     conn =
       conn
       |> put_resp_content_type("text/csv; charset=utf-8")
       |> put_resp_header("content-disposition", ~s(attachment; filename="#{filename}"))
+      |> put_resp_header("access-control-expose-headers", "content-disposition")
       |> put_resp_header("cache-control", "no-cache")
       |> send_chunked(200)
 
@@ -4555,15 +4557,20 @@ defmodule BlogEngineWeb.ApiController do
     case Plug.Conn.chunk(conn, header) do
       {:ok, conn} ->
         query =
-          from s in Sale,
-            left_join: o in Outlet, on: o.id == s.outlet_id,
-            left_join: d in Device, on: d.id == s.device_id,
-            left_join: u in User, on: u.id == s.user_id,
-            left_join: org in Organization, on: org.id == s.organization_id,
+          from(s in Sale,
+            left_join: o in Outlet,
+            on: o.id == s.outlet_id,
+            left_join: d in Device,
+            on: d.id == s.device_id,
+            left_join: u in User,
+            on: u.id == s.user_id,
+            left_join: org in Organization,
+            on: org.id == s.organization_id,
             order_by: [desc: s.id],
             select: %{
               id: s.id,
-              sales_date: fragment("COALESCE(?::text, ?::date::text)", s.sales_date, s.inserted_at),
+              sales_date:
+                fragment("COALESCE(?::text, ?::date::text)", s.sales_date, s.inserted_at),
               outlet: o.name,
               device: d.name,
               user: coalesce(u.username, u.email),
@@ -4575,9 +4582,11 @@ defmodule BlogEngineWeb.ApiController do
               organization: org.name,
               inserted_at: s.inserted_at
             }
+          )
 
         query =
-          if organization_id != nil && organization_id != "" && organization_id != "undefined" && organization_id != "null" do
+          if organization_id != nil && organization_id != "" && organization_id != "undefined" &&
+               organization_id != "null" do
             org_id =
               if is_binary(organization_id) do
                 case Integer.parse(organization_id) do
@@ -4589,7 +4598,7 @@ defmodule BlogEngineWeb.ApiController do
               end
 
             if org_id != nil do
-              from [s, o, d, u, org] in query, where: s.organization_id == ^org_id
+              from([s, o, d, u, org] in query, where: s.organization_id == ^org_id)
             else
               query
             end
@@ -4598,11 +4607,13 @@ defmodule BlogEngineWeb.ApiController do
           end
 
         query =
-          if start_date != nil && start_date != "" && start_date != "undefined" && start_date != "null" do
+          if start_date != nil && start_date != "" && start_date != "undefined" &&
+               start_date != "null" do
             case Date.from_iso8601(start_date) do
               {:ok, d} ->
-                from [s, o, d2, u, org] in query,
+                from([s, o, d2, u, org] in query,
                   where: fragment("COALESCE(?, ?::date)", s.sales_date, s.inserted_at) >= ^d
+                )
 
               _ ->
                 query
@@ -4615,8 +4626,9 @@ defmodule BlogEngineWeb.ApiController do
           if end_date != nil && end_date != "" && end_date != "undefined" && end_date != "null" do
             case Date.from_iso8601(end_date) do
               {:ok, d} ->
-                from [s, o, d2, u, org] in query,
+                from([s, o, d2, u, org] in query,
                   where: fragment("COALESCE(?, ?::date)", s.sales_date, s.inserted_at) <= ^d
+                )
 
               _ ->
                 query

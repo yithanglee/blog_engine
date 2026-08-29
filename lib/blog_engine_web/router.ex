@@ -44,7 +44,8 @@ defmodule BlogEngineWeb.Router do
         "http://localhost:8081",
         "https://701e-2405-3800-91a-cd6d-344b-51a2-f232-2356.ngrok-free.app",
         "http://10.0.2.2:8080"
-      ]
+      ],
+      expose: ["content-disposition"]
 
     plug(BlogEngine.ApiAuthorization)
   end
