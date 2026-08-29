@@ -27,7 +27,7 @@ defmodule BlogEngineWeb.Router do
   end
 
   pipeline :svt_api do
-    plug :accepts, ["json"]
+    plug :accepts, ["json", "csv"]
 
     plug CORSPlug,
       origin: [
@@ -148,6 +148,8 @@ defmodule BlogEngineWeb.Router do
     options "/user_profile", ApiController, :options_ok
 
     post "/user_profile", ApiController, :update_user_profile
+    get "/sales/export_csv", ApiController, :export_sales_csv
+    options "/sales/export_csv", ApiController, :options_ok
     options("/:model", ApiController, :datatable)
     get("/:model", ApiController, :datatable)
     post("/:model", ApiController, :form_submission)

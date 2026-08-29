@@ -4527,4 +4527,158 @@ defmodule BlogEngineWeb.ApiController do
     do: "Could not link Firebase ID to your profile"
 
   defp firebase_signin_error_message(_), do: "Firebase sign-in failed"
+
+  @doc """
+  Export sales list as a streamed CSV file filtered by organization_id and date range (start_date, end_date).
+  """
+  def export_sales_csv(conn, params) do
+    import Ecto.Query
+    alias BlogEngine.Repo
+    alias BlogEngine.Settings.{Sale, Outlet, Device, User, Organization}
+
+    organization_id = params["organization_id"]
+    start_date = params["start_date"]
+    end_date = params["end_date"]
+
+    filename = "sales_export_#{start_date || "all"}_#{end_date || "all"}.csv"
+
+    conn =
+      conn
+      |> put_resp_content_type("text/csv; charset=utf-8")
+      |> put_resp_header("content-disposition", ~s(attachment; filename="#{filename}"))
+      |> put_resp_header("cache-control", "no-cache")
+      |> send_chunked(200)
+
+    header =
+      "ID,Sales Date,Outlet,Device,User,Amount,Status,Payment Ref,Payment Channel,Sales Type,Organization,Created At\r\n"
+
+    case Plug.Conn.chunk(conn, header) do
+      {:ok, conn} ->
+        query =
+          from s in Sale,
+            left_join: o in Outlet, on: o.id == s.outlet_id,
+            left_join: d in Device, on: d.id == s.device_id,
+            left_join: u in User, on: u.id == s.user_id,
+            left_join: org in Organization, on: org.id == s.organization_id,
+            order_by: [desc: s.id],
+            select: %{
+              id: s.id,
+              sales_date: fragment("COALESCE(?::text, ?::date::text)", s.sales_date, s.inserted_at),
+              outlet: o.name,
+              device: d.name,
+              user: coalesce(u.username, u.email),
+              amount: s.amount,
+              status: s.status,
+              payment_ref: s.payment_ref,
+              payment_channel: s.payment_channel,
+              sales_type: s.sales_type,
+              organization: org.name,
+              inserted_at: s.inserted_at
+            }
+
+        query =
+          if organization_id != nil && organization_id != "" && organization_id != "undefined" && organization_id != "null" do
+            org_id =
+              if is_binary(organization_id) do
+                case Integer.parse(organization_id) do
+                  {id, _} -> id
+                  _ -> nil
+                end
+              else
+                organization_id
+              end
+
+            if org_id != nil do
+              from [s, o, d, u, org] in query, where: s.organization_id == ^org_id
+            else
+              query
+            end
+          else
+            query
+          end
+
+        query =
+          if start_date != nil && start_date != "" && start_date != "undefined" && start_date != "null" do
+            case Date.from_iso8601(start_date) do
+              {:ok, d} ->
+                from [s, o, d2, u, org] in query,
+                  where: fragment("COALESCE(?, ?::date)", s.sales_date, s.inserted_at) >= ^d
+
+              _ ->
+                query
+            end
+          else
+            query
+          end
+
+        query =
+          if end_date != nil && end_date != "" && end_date != "undefined" && end_date != "null" do
+            case Date.from_iso8601(end_date) do
+              {:ok, d} ->
+                from [s, o, d2, u, org] in query,
+                  where: fragment("COALESCE(?, ?::date)", s.sales_date, s.inserted_at) <= ^d
+
+              _ ->
+                query
+            end
+          else
+            query
+          end
+
+        escape_csv = fn val ->
+          if val == nil do
+            ""
+          else
+            str = to_string(val)
+
+            if String.contains?(str, [",", "\"", "\n", "\r"]) do
+              "\"" <> String.replace(str, "\"", "\"\"") <> "\""
+            else
+              str
+            end
+          end
+        end
+
+        format_row = fn row ->
+          [
+            escape_csv.(row.id),
+            escape_csv.(row.sales_date),
+            escape_csv.(row.outlet),
+            escape_csv.(row.device),
+            escape_csv.(row.user),
+            escape_csv.(row.amount),
+            escape_csv.(row.status),
+            escape_csv.(row.payment_ref),
+            escape_csv.(row.payment_channel),
+            escape_csv.(row.sales_type),
+            escape_csv.(row.organization),
+            escape_csv.(row.inserted_at)
+          ]
+          |> Enum.join(",")
+          |> Kernel.<>("\r\n")
+        end
+
+        Repo.transaction(
+          fn ->
+            query
+            |> Repo.stream(max_rows: 500)
+            |> Stream.map(format_row)
+            |> Stream.chunk_every(100)
+            |> Stream.map(&Enum.join(&1, ""))
+            |> Enum.reduce_while(conn, fn chunk_data, conn ->
+              case Plug.Conn.chunk(conn, chunk_data) do
+                {:ok, conn} -> {:cont, conn}
+                {:error, :closed} -> {:halt, conn}
+              end
+            end)
+          end,
+          timeout: :infinity
+        )
+
+        conn
+
+      {:error, :closed} ->
+        conn
+    end
+  end
 end
