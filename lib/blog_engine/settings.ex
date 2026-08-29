@@ -414,6 +414,51 @@ defmodule BlogEngine.Settings do
     Repo.delete(model)
   end
 
+  def seed_default_slides do
+    default_slides = [
+      %{
+        order: 1,
+        remarks: "Empowering Vending Machines with E-Wallet Payments",
+        img_url: "/images/qr-sticker-step.png",
+        mobile_img_url: "/images/qr-sticker-step.png",
+        is_show: true,
+        is_banner: true,
+        class_list: "col-lg-12 col-12",
+        content: "Affordable, maintenance-free e-wallet integration using static DuitNow QR codes."
+      },
+      %{
+        order: 2,
+        remarks: "DuitNow QR Vending Machine Live Demo",
+        youtube_url: "https://www.youtube.com/shorts/EdY6AMVoTDo",
+        is_show: true,
+        is_banner: false,
+        class_list: "col-lg-6 col-12",
+        content: "Watch our IoT controller in action with DuitNow QR instantaneous cashless dispensing."
+      }
+    ]
+
+    Enum.map(default_slides, fn slide_attrs ->
+      query =
+        if Map.get(slide_attrs, :youtube_url) do
+          from(s in Slide, where: s.youtube_url == ^slide_attrs.youtube_url)
+        else
+          from(s in Slide, where: s.remarks == ^slide_attrs.remarks)
+        end
+
+      case Repo.one(query) do
+        nil ->
+          %Slide{}
+          |> Slide.changeset(slide_attrs)
+          |> Repo.insert()
+
+        existing ->
+          existing
+          |> Slide.changeset(slide_attrs)
+          |> Repo.update()
+      end
+    end)
+  end
+
   alias BlogEngine.Settings.SessionUser
 
   def get_member_by_cookie(cookie) do
