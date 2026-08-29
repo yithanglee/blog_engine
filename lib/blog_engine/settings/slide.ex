@@ -11,6 +11,7 @@ defmodule BlogEngine.Settings.Slide do
     field(:class_list, :string, default: "col-lg-4 col-sm-6 col-12")
     field(:content, :binary)
     field(:is_banner, :boolean, default: false)
+    field(:youtube_url, :string)
     timestamps()
   end
 
@@ -25,7 +26,8 @@ defmodule BlogEngine.Settings.Slide do
       :order,
       :img_url,
       :remarks,
-      :is_show
+      :is_show,
+      :youtube_url
     ])
 
     # |> validate_required([:order, :img_url, :remarks, :is_show])
