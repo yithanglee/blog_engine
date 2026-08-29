@@ -6,6 +6,7 @@ defmodule BlogEngine.Settings.Slide do
     field(:mobile_img_url, :string)
     field(:img_url, :string)
     field(:is_show, :boolean, default: false)
+    field(:is_djtech, :boolean, default: false)
     field(:order, :integer)
     field(:remarks, :string)
     field(:class_list, :string, default: "col-lg-4 col-sm-6 col-12")
@@ -27,6 +28,7 @@ defmodule BlogEngine.Settings.Slide do
       :img_url,
       :remarks,
       :is_show,
+      :is_djtech,
       :youtube_url
     ])
 
