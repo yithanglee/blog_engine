@@ -4438,7 +4438,39 @@ defmodule BlogEngine.Settings do
 
   defp parse_naive_datetime(_), do: nil
 
-  alias BlogEngine.Settings.{UserPointTransaction}
+  alias BlogEngine.Settings.{UserPointTransaction, OrganizationRedemptionRule}
+
+  def list_organization_redemption_rules do
+    Repo.all(from(r in OrganizationRedemptionRule, order_by: [asc: r.points_required]))
+  end
+
+  def list_organization_redemption_rules_by_org(org_id) when is_integer(org_id) do
+    Repo.all(
+      from(r in OrganizationRedemptionRule,
+        where: r.organization_id == ^org_id,
+        order_by: [asc: r.points_required]
+      )
+    )
+  end
+
+  def get_organization_redemption_rule!(id), do: Repo.get!(OrganizationRedemptionRule, id)
+  def get_organization_redemption_rule(id), do: Repo.get(OrganizationRedemptionRule, id)
+
+  def create_organization_redemption_rule(attrs \\ %{}) do
+    %OrganizationRedemptionRule{}
+    |> OrganizationRedemptionRule.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def update_organization_redemption_rule(%OrganizationRedemptionRule{} = rule, attrs) do
+    rule
+    |> OrganizationRedemptionRule.changeset(attrs)
+    |> Repo.update()
+  end
+
+  def delete_organization_redemption_rule(%OrganizationRedemptionRule{} = rule) do
+    Repo.delete(rule)
+  end
 
   @doc """
   Gets summary of points for a user in an organization.
@@ -4484,9 +4516,38 @@ defmodule BlogEngine.Settings do
         )
       )
 
+    rules =
+      Repo.all(
+        from(r in OrganizationRedemptionRule,
+          where: r.organization_id == ^organization_id and r.is_active == true,
+          order_by: [asc: r.points_required]
+        )
+      )
+
+    all_rewards =
+      (Enum.map(next_vouchers, fn v ->
+         %{
+           id: v.id,
+           code: v.code,
+           amount: v.amount,
+           points_required: v.points_required,
+           remarks: v.remarks
+         }
+       end) ++
+         Enum.map(rules, fn r ->
+           %{
+             id: r.id,
+             code: "#{r.voucher_prefix || "REW"}-#{r.id}",
+             amount: r.reward_amount,
+             points_required: r.points_required,
+             remarks: r.name
+           }
+         end))
+      |> Enum.sort_by(&(&1.points_required || 0.0))
+
     next_reward =
-      Enum.find(next_vouchers, fn v -> (v.points_required || 0.0) > points_balance end) ||
-        List.last(next_vouchers)
+      Enum.find(all_rewards, fn v -> (v.points_required || 0.0) > points_balance end) ||
+        List.last(all_rewards)
 
     target_points = if next_reward, do: (next_reward.points_required || 0.0), else: 100.0
 
@@ -4503,18 +4564,7 @@ defmodule BlogEngine.Settings do
       points_per_rm: points_per_rm,
       total_earned_points: to_float_2dp(total_earned),
       total_redeemed_points: to_float_2dp(total_redeemed),
-      next_reward:
-        if next_reward do
-          %{
-            id: next_reward.id,
-            code: next_reward.code,
-            amount: next_reward.amount,
-            points_required: next_reward.points_required,
-            remarks: next_reward.remarks
-          }
-        else
-          nil
-        end,
+      next_reward: next_reward,
       target_points: target_points,
       points_needed: max(0.0, target_points - points_balance) |> to_float_2dp(),
       progress_percent: progress_percent
@@ -4535,7 +4585,7 @@ defmodule BlogEngine.Settings do
     }
 
   @doc """
-  Lists point vouchers available for redemption by organization users.
+  Lists point vouchers and active redemption rules available for redemption by organization users.
   """
   def list_point_vouchers_for_user(user_id, organization_id)
       when is_integer(user_id) and is_integer(organization_id) do
@@ -4564,30 +4614,61 @@ defmodule BlogEngine.Settings do
       )
       |> MapSet.new()
 
-    vouchers
-    |> Enum.map(fn v ->
-      already_redeemed = MapSet.member?(redeemed_voucher_ids, v.id)
-      points_needed = (v.points_required || 0.0) |> to_float_2dp()
-      can_afford = points_balance >= points_needed
+    voucher_items =
+      vouchers
+      |> Enum.map(fn v ->
+        already_redeemed = MapSet.member?(redeemed_voucher_ids, v.id)
+        points_needed = (v.points_required || 0.0) |> to_float_2dp()
+        can_afford = points_balance >= points_needed
 
-      %{
-        id: v.id,
-        code: v.code,
-        amount: v.amount,
-        points_required: points_needed,
-        expires_at: v.expires_at,
-        remarks: v.remarks || "Voucher RM #{v.amount |> to_float_2dp()}",
-        can_redeem: can_afford and not already_redeemed,
-        already_redeemed: already_redeemed,
-        points_needed: max(0.0, points_needed - points_balance) |> to_float_2dp()
-      }
-    end)
+        %{
+          id: v.id,
+          code: v.code,
+          amount: v.amount,
+          points_required: points_needed,
+          expires_at: v.expires_at,
+          remarks: v.remarks || "Voucher RM #{v.amount |> to_float_2dp()}",
+          can_redeem: can_afford and not already_redeemed,
+          already_redeemed: already_redeemed,
+          points_needed: max(0.0, points_needed - points_balance) |> to_float_2dp()
+        }
+      end)
+
+    rules =
+      Repo.all(
+        from(r in OrganizationRedemptionRule,
+          where: r.organization_id == ^organization_id and r.is_active == true,
+          order_by: [asc: r.points_required, desc: r.reward_amount]
+        )
+      )
+
+    rule_items =
+      rules
+      |> Enum.map(fn r ->
+        points_needed = (r.points_required || 0.0) |> to_float_2dp()
+        can_afford = points_balance >= points_needed
+
+        %{
+          id: "rule_#{r.id}",
+          rule_id: r.id,
+          code: "#{r.voucher_prefix || "REW"}-#{r.id}",
+          amount: r.reward_amount,
+          points_required: points_needed,
+          expires_at: nil,
+          remarks: r.name || "RM #{r.reward_amount |> to_float_2dp()} Credit",
+          can_redeem: can_afford,
+          already_redeemed: false,
+          points_needed: max(0.0, points_needed - points_balance) |> to_float_2dp()
+        }
+      end)
+
+    voucher_items ++ rule_items
   end
 
   def list_point_vouchers_for_user(_, _), do: []
 
   @doc """
-  Redeem a voucher using points.
+  Redeem a voucher or an organization redemption rule using points.
   """
   def redeem_voucher_with_points(user_id, voucher_id_or_code, organization_id \\ nil) do
     user =
@@ -4599,15 +4680,132 @@ defmodule BlogEngine.Settings do
     with %User{} = u <- user || {:error, "User not found"},
          org_id <- organization_id || u.organization_id || 0,
          true <- org_id > 0 || {:error, "Organization not specified"},
-         voucher <-
-           find_voucher_by_id_or_code(voucher_id_or_code, org_id) ||
-             {:error, "Voucher not found"},
+         item <-
+           find_voucher_or_rule(voucher_id_or_code, org_id) ||
+             {:error, "Reward or voucher not found"},
          ut <-
            get_user_topup_by_user_and_organization(u.id, org_id) ||
-             {:error, "User account not initialized"},
-         pts_req <- (voucher.points_required || 0.0) |> to_float_2dp(),
-         true <- pts_req > 0 || {:error, "This voucher cannot be redeemed with points"},
-         user_pts <- (ut.points_balance || 0.0) |> to_float_2dp(),
+             {:error, "User account not initialized"} do
+      case item do
+        %OrganizationRedemptionRule{} = rule ->
+          redeem_rule_with_points(u, org_id, rule, ut)
+
+        %Voucher{} = voucher ->
+          redeem_voucher_struct_with_points(u, org_id, voucher, ut)
+      end
+    else
+      {:error, reason} when is_binary(reason) -> {:error, reason}
+      _ -> {:error, "Failed to redeem voucher with points"}
+    end
+  end
+
+  defp redeem_rule_with_points(u, org_id, %OrganizationRedemptionRule{} = rule, ut) do
+    pts_req = (rule.points_required || 0.0) |> to_float_2dp()
+    user_pts = (ut.points_balance || 0.0) |> to_float_2dp()
+
+    cond do
+      rule.is_active != true ->
+        {:error, "This redemption rule is currently inactive"}
+
+      pts_req <= 0 ->
+        {:error, "Invalid rule point requirement"}
+
+      user_pts < pts_req ->
+        {:error, "Insufficient points. You need #{pts_req} pts, but currently have #{user_pts} pts."}
+
+      true ->
+        now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+        expiry_days = rule.voucher_expiry_days || 30
+        expires_at = NaiveDateTime.add(now, expiry_days * 86400, :second)
+        new_points = (user_pts - pts_req) |> to_float_2dp()
+        vch_code = "#{rule.voucher_prefix || "REW"}-" <> (:crypto.strong_rand_bytes(4) |> Base.encode16())
+
+        Multi.new()
+        |> Multi.run(:update_points, fn _repo, _changes ->
+          UserTopup.changeset(ut, %{points_balance: new_points}) |> Repo.update()
+        end)
+        |> Multi.run(:voucher, fn _repo, _changes ->
+          Voucher.changeset(%Voucher{}, %{
+            code: vch_code,
+            amount: rule.reward_amount,
+            points_required: pts_req,
+            is_point_voucher: true,
+            organization_id: org_id,
+            status: "redeemed",
+            max_redemptions: 1,
+            redemptions_count: 1,
+            redeemed_by_user_id: u.id,
+            redeemed_at: now,
+            expires_at: expires_at,
+            remarks: "Redeemed from rule: #{rule.name}"
+          })
+          |> Repo.insert()
+        end)
+        |> Multi.run(:point_transaction, fn _repo, %{voucher: vch} ->
+          UserPointTransaction.changeset(%UserPointTransaction{}, %{
+            user_id: u.id,
+            organization_id: org_id,
+            points: -pts_req,
+            before_points: user_pts,
+            after_points: new_points,
+            transaction_type: "redeemed",
+            remarks: "Redeemed #{rule.name} (RM #{rule.reward_amount}) for #{pts_req} pts",
+            voucher_id: vch.id
+          })
+          |> Repo.insert()
+        end)
+        |> Multi.run(:voucher_redemption, fn _repo, %{voucher: vch} ->
+          VoucherRedemption.changeset(%VoucherRedemption{}, %{
+            voucher_id: vch.id,
+            user_id: u.id,
+            organization_id: org_id,
+            amount: rule.reward_amount,
+            redeemed_at: now
+          })
+          |> Repo.insert()
+        end)
+        |> Multi.run(:user_topup_transaction, fn _repo, _changes ->
+          create_user_topup_transaction(%{
+            user_id: u.id,
+            organization_id: org_id,
+            amount: rule.reward_amount,
+            remarks: "Reward Rule Redemption (#{rule.name})",
+            skip_points: true
+          })
+        end)
+        |> Repo.transaction()
+        |> case do
+          {:ok, %{user_topup_transaction: trx, voucher: vch}} ->
+            new_bal =
+              case get_user_topup_by_user_and_organization(u.id, org_id) do
+                %UserTopup{balance: b} -> b
+                _ -> trx.after_amt
+              end
+
+            {:ok,
+             %{
+               voucher: vch,
+               amount: rule.reward_amount,
+               points_spent: pts_req,
+               points_balance: new_points,
+               new_points_balance: new_points,
+               balance: new_bal,
+               transaction: trx,
+               message:
+                 "Successfully redeemed #{rule.name} (RM #{rule.reward_amount |> to_float_2dp()}) using #{pts_req} points!"
+             }}
+
+          {:error, _step, failed_val, _} ->
+            {:error, "Redemption failed: #{inspect(failed_val)}"}
+        end
+    end
+  end
+
+  defp redeem_voucher_struct_with_points(u, org_id, %Voucher{} = voucher, ut) do
+    pts_req = (voucher.points_required || 0.0) |> to_float_2dp()
+    user_pts = (ut.points_balance || 0.0) |> to_float_2dp()
+
+    with true <- pts_req > 0 || {:error, "This voucher cannot be redeemed with points"},
          true <-
            user_pts >= pts_req ||
              {:error,
@@ -4692,20 +4890,26 @@ defmodule BlogEngine.Settings do
         {:error, _step, failed_val, _} ->
           {:error, "Redemption failed: #{inspect(failed_val)}"}
       end
-    else
-      {:error, reason} when is_binary(reason) -> {:error, reason}
-      _ -> {:error, "Failed to redeem voucher with points"}
     end
   end
 
-  defp find_voucher_by_id_or_code(id, organization_id) when is_integer(id) do
-    Repo.get_by(Voucher, id: id, organization_id: organization_id)
+  defp find_voucher_or_rule("rule_" <> id_str, organization_id) do
+    case Integer.parse(id_str) do
+      {id, ""} -> Repo.get_by(OrganizationRedemptionRule, id: id, organization_id: organization_id)
+      _ -> nil
+    end
   end
 
-  defp find_voucher_by_id_or_code(code_str, organization_id) when is_binary(code_str) do
+  defp find_voucher_or_rule(id, organization_id) when is_integer(id) do
+    Repo.get_by(Voucher, id: id, organization_id: organization_id) ||
+      Repo.get_by(OrganizationRedemptionRule, id: id, organization_id: organization_id)
+  end
+
+  defp find_voucher_or_rule(code_str, organization_id) when is_binary(code_str) do
     case Integer.parse(String.trim(code_str)) do
       {id, ""} ->
         Repo.get_by(Voucher, id: id, organization_id: organization_id) ||
+          Repo.get_by(OrganizationRedemptionRule, id: id, organization_id: organization_id) ||
           get_voucher_by_code(code_str, organization_id)
 
       _ ->
@@ -4713,7 +4917,7 @@ defmodule BlogEngine.Settings do
     end
   end
 
-  defp find_voucher_by_id_or_code(_, _), do: nil
+  defp find_voucher_or_rule(_, _), do: nil
 
   defp normalize_voucher_attrs(attrs) when is_map(attrs) do
     attrs
