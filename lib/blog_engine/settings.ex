@@ -4226,6 +4226,22 @@ defmodule BlogEngine.Settings do
           1
       end
 
+    image_url =
+      Map.get(params, "image_url") ||
+        Map.get(params, :image_url) ||
+        Map.get(params, "img_url") ||
+        Map.get(params, :img_url)
+
+    points_required =
+      Map.get(params, "points_required") ||
+        Map.get(params, :points_required) ||
+        0.0
+
+    is_point_voucher =
+      Map.get(params, "is_point_voucher") ||
+        Map.get(params, :is_point_voucher) ||
+        false
+
     created_vouchers =
       1..quantity
       |> Enum.map(fn _ ->
@@ -4241,10 +4257,13 @@ defmodule BlogEngine.Settings do
         attrs = %{
           "code" => code,
           "amount" => amount,
+          "points_required" => points_required,
+          "is_point_voucher" => is_point_voucher,
           "expires_at" => expires_at,
           "organization_id" => org_id,
           "batch_no" => batch_no,
           "remarks" => remarks,
+          "image_url" => image_url,
           "max_redemptions" => max_redemptions,
           "status" => "active"
         }
@@ -4531,7 +4550,8 @@ defmodule BlogEngine.Settings do
            code: v.code,
            amount: v.amount,
            points_required: v.points_required,
-           remarks: v.remarks
+           remarks: v.remarks,
+           image_url: v.image_url
          }
        end) ++
          Enum.map(rules, fn r ->
@@ -4540,7 +4560,8 @@ defmodule BlogEngine.Settings do
              code: "#{r.voucher_prefix || "REW"}-#{r.id}",
              amount: r.reward_amount,
              points_required: r.points_required,
-             remarks: r.name
+             remarks: r.name,
+             image_url: r.image_url
            }
          end))
       |> Enum.sort_by(&(&1.points_required || 0.0))
@@ -4628,6 +4649,7 @@ defmodule BlogEngine.Settings do
           points_required: points_needed,
           expires_at: v.expires_at,
           remarks: v.remarks || "Voucher RM #{v.amount |> to_float_2dp()}",
+          image_url: v.image_url,
           can_redeem: can_afford and not already_redeemed,
           already_redeemed: already_redeemed,
           points_needed: max(0.0, points_needed - points_balance) |> to_float_2dp()
@@ -4656,6 +4678,7 @@ defmodule BlogEngine.Settings do
           points_required: points_needed,
           expires_at: nil,
           remarks: r.name || "RM #{r.reward_amount |> to_float_2dp()} Credit",
+          image_url: r.image_url,
           can_redeem: can_afford,
           already_redeemed: false,
           points_needed: max(0.0, points_needed - points_balance) |> to_float_2dp()
@@ -4737,7 +4760,8 @@ defmodule BlogEngine.Settings do
             redeemed_by_user_id: u.id,
             redeemed_at: now,
             expires_at: expires_at,
-            remarks: "Redeemed from rule: #{rule.name}"
+            remarks: "Redeemed from rule: #{rule.name}",
+            image_url: rule.image_url
           })
           |> Repo.insert()
         end)
@@ -4934,6 +4958,10 @@ defmodule BlogEngine.Settings do
       {:is_point_voucher, v} ->
         {:is_point_voucher, if(is_binary(v), do: v in ["true", "1"], else: !!v)}
 
+      {"image_url", v} -> {:image_url, v}
+      {:image_url, v} -> {:image_url, v}
+      {"img_url", v} -> {:image_url, v}
+      {:img_url, v} -> {:image_url, v}
       {"expires_at", v} -> {:expires_at, parse_naive_datetime(v)}
       {:expires_at, v} -> {:expires_at, parse_naive_datetime(v)}
       {k, v} when is_binary(k) -> {String.to_atom(k), v}

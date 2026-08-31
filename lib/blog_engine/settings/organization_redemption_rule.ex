@@ -10,6 +10,7 @@ defmodule BlogEngine.Settings.OrganizationRedemptionRule do
     field :voucher_prefix, :string, default: "REW"
     field :voucher_expiry_days, :integer, default: 30
     field :is_active, :boolean, default: true
+    field :image_url, :string
 
     belongs_to :organization, BlogEngine.Settings.Organization
 
@@ -27,6 +28,7 @@ defmodule BlogEngine.Settings.OrganizationRedemptionRule do
       :voucher_prefix,
       :voucher_expiry_days,
       :is_active,
+      :image_url,
       :organization_id
     ])
     |> validate_required([:name, :points_required, :reward_amount, :organization_id])

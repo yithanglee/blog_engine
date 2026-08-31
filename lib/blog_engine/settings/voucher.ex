@@ -13,6 +13,7 @@ defmodule BlogEngine.Settings.Voucher do
     field :redemptions_count, :integer, default: 0
     field :batch_no, :string
     field :remarks, :string
+    field :image_url, :string
     field :redeemed_at, :naive_datetime
 
     belongs_to :organization, BlogEngine.Settings.Organization
@@ -36,6 +37,7 @@ defmodule BlogEngine.Settings.Voucher do
       :redemptions_count,
       :batch_no,
       :remarks,
+      :image_url,
       :organization_id,
       :redeemed_by_user_id,
       :redeemed_at
