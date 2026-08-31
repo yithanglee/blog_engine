@@ -892,6 +892,9 @@ defmodule BlogEngine.Settings do
     Repo.all(from(u in User, where: u.id == ^id, preload: [:organization])) |> List.first()
   end
 
+  def get_user(id), do: get_user!(id)
+
+
   def create_user(attrs \\ %{}) do
     attrs =
       cond do
@@ -3731,14 +3734,25 @@ defmodule BlogEngine.Settings do
         trx = Map.get(multi_res, :user_topup_transaction)
 
         if trx.amount > 0 do
-          trx = Repo.preload(trx, :organization)
+          trx = Repo.preload(trx, [:organization, :user_topup])
 
-          # organization = BlogEngine.Settings.get_user_topup_transaction!() |> BlogEngine.Repo.preload(:organization) |> Map.get(:organization)
-          organization = trx |> Map.get(:organization)
+          org_id =
+            case trx.organization do
+              %{id: oid} ->
+                oid
 
-          Task.start(fn ->
-            fcm_notify_org_operators_topup(organization.id, trx.user_id, trx.amount)
-          end)
+              _ ->
+                case trx.user_topup do
+                  %{organization_id: oid} -> oid
+                  _ -> Map.get(params, :organization_id)
+                end
+            end
+
+          if org_id do
+            Task.start(fn ->
+              fcm_notify_org_operators_topup(org_id, trx.user_id, trx.amount)
+            end)
+          end
         end
 
         {:ok, trx}
@@ -4056,5 +4070,343 @@ defmodule BlogEngine.Settings do
     OrganizationChatMessage.changeset(%OrganizationChatMessage{}, attrs)
     |> Repo.insert()
   end
+
+  alias BlogEngine.Settings.{Voucher, VoucherRedemption}
+
+  def list_vouchers do
+    Repo.all(from(v in Voucher, order_by: [desc: v.inserted_at]))
+  end
+
+  def list_vouchers_by_organization(organization_id) when is_integer(organization_id) do
+    Repo.all(
+      from(v in Voucher,
+        where: v.organization_id == ^organization_id,
+        order_by: [desc: v.inserted_at]
+      )
+    )
+  end
+
+  def get_voucher!(id), do: Repo.get!(Voucher, id)
+  def get_voucher(id), do: Repo.get(Voucher, id)
+
+  def get_voucher_by_code(code, organization_id)
+      when is_binary(code) and is_integer(organization_id) do
+    cleaned_code = code |> String.trim() |> String.upcase()
+
+    Repo.one(
+      from(v in Voucher,
+        where:
+          fragment("UPPER(TRIM(?)) = ?", v.code, ^cleaned_code) and
+            v.organization_id == ^organization_id,
+        limit: 1
+      )
+    )
+  end
+
+  def get_voucher_by_code(_, _), do: nil
+
+  def get_voucher_by_code(code) when is_binary(code) do
+    cleaned_code = code |> String.trim() |> String.upcase()
+
+    Repo.one(
+      from(v in Voucher,
+        where: fragment("UPPER(TRIM(?)) = ?", v.code, ^cleaned_code),
+        limit: 1
+      )
+    )
+  end
+
+  def get_voucher_by_code(_), do: nil
+
+  def create_voucher(attrs \\ %{}) do
+    attrs = normalize_voucher_attrs(attrs)
+    Voucher.changeset(%Voucher{}, attrs) |> Repo.insert()
+  end
+
+  def update_voucher(%Voucher{} = voucher, attrs) do
+    attrs = normalize_voucher_attrs(attrs)
+    Voucher.changeset(voucher, attrs) |> Repo.update()
+  end
+
+  def delete_voucher(%Voucher{} = voucher) do
+    Repo.delete(voucher)
+  end
+
+  def generate_vouchers(params) when is_map(params) do
+    org_id = Map.get(params, "organization_id") || Map.get(params, :organization_id)
+    amount = Map.get(params, "amount") || Map.get(params, :amount) || 0.0
+    expires_at = Map.get(params, "expires_at") || Map.get(params, :expires_at)
+    quantity = Map.get(params, "quantity") || Map.get(params, :quantity) || 1
+
+    batch_no =
+      Map.get(params, "batch_no") ||
+        Map.get(params, :batch_no) ||
+        "BATCH-" <> (:crypto.strong_rand_bytes(4) |> Base.encode16())
+
+    prefix = Map.get(params, "prefix") || Map.get(params, :prefix) || ""
+    remarks = Map.get(params, "remarks") || Map.get(params, :remarks)
+    max_redemptions = Map.get(params, "max_redemptions") || Map.get(params, :max_redemptions) || 1
+
+    amount = to_float_2dp(amount)
+
+    quantity =
+      case quantity do
+        q when is_binary(q) ->
+          case Integer.parse(q) do
+            {i, _} -> i
+            _ -> 1
+          end
+
+        q when is_integer(q) ->
+          q
+
+        _ ->
+          1
+      end
+
+    max_redemptions =
+      case max_redemptions do
+        m when is_binary(m) ->
+          case Integer.parse(m) do
+            {i, _} -> i
+            _ -> 1
+          end
+
+        m when is_integer(m) ->
+          m
+
+        _ ->
+          1
+      end
+
+    created_vouchers =
+      1..quantity
+      |> Enum.map(fn _ ->
+        random_suffix = :crypto.strong_rand_bytes(4) |> Base.encode16()
+
+        code =
+          if prefix != "" and prefix != nil do
+            "#{String.upcase(to_string(prefix))}-#{random_suffix}"
+          else
+            "VCH-#{random_suffix}"
+          end
+
+        attrs = %{
+          "code" => code,
+          "amount" => amount,
+          "expires_at" => expires_at,
+          "organization_id" => org_id,
+          "batch_no" => batch_no,
+          "remarks" => remarks,
+          "max_redemptions" => max_redemptions,
+          "status" => "active"
+        }
+
+        create_voucher(attrs)
+      end)
+
+    {:ok, %{batch_no: batch_no, total: quantity, vouchers: created_vouchers}}
+  end
+
+  def redeem_voucher(user_id, code, organization_id \\ nil) do
+    user =
+      case user_id do
+        id when is_integer(id) -> Repo.get(User, id)
+        _ -> nil
+      end
+
+    with %User{} = u <- user || {:error, "User not found"},
+         true <-
+           (is_binary(code) and String.trim(code) != "") ||
+             {:error, "Voucher code cannot be empty"},
+         org_id <- organization_id || u.organization_id || 0,
+         true <- org_id > 0 || {:error, "Organization not specified"},
+         cleaned_code <- code |> String.trim() |> String.upcase(),
+         %Voucher{} = voucher <-
+           get_voucher_by_code(cleaned_code, org_id) ||
+             {:error, "Invalid or unrecognized voucher code for this organization"},
+         :ok <- validate_voucher_for_redemption(voucher, u.id) do
+      now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+      Multi.new()
+      |> Multi.run(:check_redemption, fn _repo, _changes ->
+        existing =
+          Repo.one(
+            from(r in VoucherRedemption,
+              where: r.voucher_id == ^voucher.id and r.user_id == ^u.id,
+              limit: 1
+            )
+          )
+
+        if existing do
+          {:error, "You have already redeemed this voucher"}
+        else
+          {:ok, true}
+        end
+      end)
+      |> Multi.run(:voucher_redemption, fn _repo, _changes ->
+        VoucherRedemption.changeset(%VoucherRedemption{}, %{
+          voucher_id: voucher.id,
+          user_id: u.id,
+          organization_id: org_id,
+          amount: voucher.amount,
+          redeemed_at: now
+        })
+        |> Repo.insert()
+      end)
+      |> Multi.run(:voucher_update, fn _repo, _changes ->
+        new_count = (voucher.redemptions_count || 0) + 1
+
+        new_status =
+          if new_count >= (voucher.max_redemptions || 1), do: "redeemed", else: voucher.status
+
+        Voucher.changeset(voucher, %{
+          redemptions_count: new_count,
+          status: new_status,
+          redeemed_by_user_id: u.id,
+          redeemed_at: now
+        })
+        |> Repo.update()
+      end)
+      |> Multi.run(:user_topup_transaction, fn _repo, _changes ->
+        create_user_topup_transaction(%{
+          user_id: u.id,
+          organization_id: org_id,
+          amount: voucher.amount,
+          remarks: "Voucher Redeem (#{voucher.code})"
+        })
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{user_topup_transaction: trx, voucher_update: updated_voucher}} ->
+          new_bal =
+            case get_user_topup_by_user_and_organization(u.id, org_id) do
+              %UserTopup{balance: b} -> b
+              _ -> trx.after_amt
+            end
+
+          {:ok,
+           %{
+             voucher: updated_voucher,
+             amount: voucher.amount,
+             transaction: trx,
+             balance: new_bal,
+             message:
+               "Voucher redeemed successfully! Added RM #{voucher.amount |> to_float_2dp()} to credits."
+           }}
+
+        {:error, :check_redemption, msg, _} ->
+          {:error, msg}
+
+        {:error, _step, failed_val, _} ->
+          error_msg =
+            case failed_val do
+              %Ecto.Changeset{} = cs ->
+                Ecto.Changeset.traverse_errors(cs, fn {msg, _} -> msg end)
+                |> inspect()
+
+              msg when is_binary(msg) ->
+                msg
+
+              other ->
+                inspect(other)
+            end
+
+          {:error, "Redemption failed: #{error_msg}"}
+      end
+    else
+      {:error, reason} when is_binary(reason) -> {:error, reason}
+      nil -> {:error, "Voucher not found"}
+      _ -> {:error, "Failed to validate voucher"}
+    end
+  end
+
+  defp validate_voucher_for_redemption(%Voucher{} = voucher, user_id) do
+    now = NaiveDateTime.utc_now()
+
+    cond do
+      voucher.status != "active" ->
+        {:error, "Voucher is not active or has already been redeemed"}
+
+      voucher.expires_at != nil and NaiveDateTime.compare(voucher.expires_at, now) == :lt ->
+        Task.start(fn ->
+          Voucher.changeset(voucher, %{status: "expired"}) |> Repo.update()
+        end)
+
+        {:error, "Voucher has expired on #{format_naive_datetime(voucher.expires_at)}"}
+
+      (voucher.redemptions_count || 0) >= (voucher.max_redemptions || 1) ->
+        {:error, "Voucher redemption limit has been reached"}
+
+      true ->
+        existing =
+          Repo.one(
+            from(r in VoucherRedemption,
+              where: r.voucher_id == ^voucher.id and r.user_id == ^user_id,
+              limit: 1
+            )
+          )
+
+        if existing do
+          {:error, "You have already redeemed this voucher"}
+        else
+          :ok
+        end
+    end
+  end
+
+  defp format_naive_datetime(%NaiveDateTime{} = ndt) do
+    "#{ndt.year}-#{pad_zero(ndt.month)}-#{pad_zero(ndt.day)} #{pad_zero(ndt.hour)}:#{pad_zero(ndt.minute)}"
+  end
+
+  defp format_naive_datetime(_), do: ""
+
+  defp pad_zero(n) when is_integer(n) and n < 10, do: "0#{n}"
+  defp pad_zero(n), do: "#{n}"
+
+  defp parse_naive_datetime(nil), do: nil
+  defp parse_naive_datetime(%NaiveDateTime{} = ndt), do: ndt
+  defp parse_naive_datetime(%DateTime{} = dt), do: DateTime.to_naive(dt)
+
+  defp parse_naive_datetime(str) when is_binary(str) do
+    str = String.trim(str)
+
+    case NaiveDateTime.from_iso8601(str) do
+      {:ok, ndt} ->
+        ndt
+
+      _ ->
+        case DateTime.from_iso8601(str) do
+          {:ok, dt, _} ->
+            DateTime.to_naive(dt)
+
+          _ ->
+            case Date.from_iso8601(str) do
+              {:ok, d} -> NaiveDateTime.new!(d, ~T[23:59:59])
+              _ -> nil
+            end
+        end
+    end
+  end
+
+  defp parse_naive_datetime(_), do: nil
+
+  defp normalize_voucher_attrs(attrs) when is_map(attrs) do
+    attrs
+    |> Enum.map(fn
+      {"code", v} -> {:code, if(is_binary(v), do: v |> String.trim() |> String.upcase(), else: v)}
+      {:code, v} -> {:code, if(is_binary(v), do: v |> String.trim() |> String.upcase(), else: v)}
+      {"amount", v} -> {:amount, to_float_2dp(v)}
+      {:amount, v} -> {:amount, to_float_2dp(v)}
+      {"expires_at", v} -> {:expires_at, parse_naive_datetime(v)}
+      {:expires_at, v} -> {:expires_at, parse_naive_datetime(v)}
+      {k, v} when is_binary(k) -> {String.to_atom(k), v}
+      {k, v} -> {k, v}
+    end)
+    |> Map.new()
+  end
+
+  defp normalize_voucher_attrs(attrs), do: attrs
 end
+
 
