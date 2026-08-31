@@ -166,6 +166,61 @@ defmodule BlogEngineWeb.ApiController do
 
     res =
       case params["scope"] do
+        "get_user_points" ->
+          user = resolve_user_from_params(params)
+
+          case user do
+            %BlogEngine.Settings.User{} = u ->
+              org_id =
+                case Map.get(params, "organization_id") do
+                  v when is_integer(v) ->
+                    v
+
+                  v when is_binary(v) ->
+                    case Integer.parse(String.trim(v)) do
+                      {i, _} -> i
+                      _ -> u.organization_id
+                    end
+
+                  _ ->
+                    u.organization_id
+                end
+
+              summary = Settings.get_user_points_summary(u.id, org_id)
+              %{status: "ok", summary: summary}
+
+            _ ->
+              %{status: "error", message: "Unauthorized"}
+          end
+
+        "list_redeemable_vouchers" ->
+          user = resolve_user_from_params(params)
+
+          case user do
+            %BlogEngine.Settings.User{} = u ->
+              org_id =
+                case Map.get(params, "organization_id") do
+                  v when is_integer(v) ->
+                    v
+
+                  v when is_binary(v) ->
+                    case Integer.parse(String.trim(v)) do
+                      {i, _} -> i
+                      _ -> u.organization_id
+                    end
+
+                  _ ->
+                    u.organization_id
+                end
+
+              vouchers = Settings.list_point_vouchers_for_user(u.id, org_id)
+              summary = Settings.get_user_points_summary(u.id, org_id)
+              %{status: "ok", vouchers: vouchers, summary: summary}
+
+            _ ->
+              %{status: "error", message: "Unauthorized"}
+          end
+
         "redeem_voucher" ->
           user = resolve_user_from_params(params)
 
@@ -1568,6 +1623,49 @@ defmodule BlogEngineWeb.ApiController do
   def post(conn, params) do
     res =
       case params["scope"] do
+        "redeem_voucher_with_points" ->
+          user = resolve_user_from_params(params)
+
+          case user do
+            %BlogEngine.Settings.User{} = u ->
+              voucher_id_or_code =
+                params["voucher_id"] || params["code"] || params["voucher_code"]
+
+              org_id =
+                case Map.get(params, "organization_id") do
+                  v when is_integer(v) ->
+                    v
+
+                  v when is_binary(v) ->
+                    case Integer.parse(String.trim(v)) do
+                      {i, _} -> i
+                      _ -> u.organization_id
+                    end
+
+                  _ ->
+                    u.organization_id
+                end
+
+              case Settings.redeem_voucher_with_points(u.id, voucher_id_or_code, org_id) do
+                {:ok, res} ->
+                  %{
+                    status: "ok",
+                    message: res.message,
+                    amount: res.amount,
+                    points_spent: res.points_spent,
+                    points_balance: res.new_points_balance,
+                    balance: res.balance,
+                    code: res.voucher.code
+                  }
+
+                {:error, reason} ->
+                  %{status: "error", message: reason}
+              end
+
+            _ ->
+              %{status: "error", message: "Unauthorized or invalid user session"}
+          end
+
         "redeem_voucher" ->
           user = resolve_user_from_params(params)
 

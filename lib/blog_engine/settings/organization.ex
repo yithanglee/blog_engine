@@ -18,6 +18,8 @@ defmodule BlogEngine.Settings.Organization do
     field(:mkey, :string)
     field(:mcode, :string)
     field(:tnc, :binary)
+    field(:points_per_rm, :float, default: 1.0)
+    field(:point_collection_enabled, :boolean, default: true)
     has_many(:outlets, BlogEngine.Settings.Outlet)
 
     timestamps()
@@ -29,6 +31,8 @@ defmodule BlogEngine.Settings.Organization do
     |> cast(attrs, [
       :service_account_url,
       :tnc,
+      :points_per_rm,
+      :point_collection_enabled,
       :name,
       :mkey,
       :mcode,

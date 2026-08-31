@@ -7,6 +7,8 @@ defmodule BlogEngine.Settings.Voucher do
     field :amount, :float, default: 0.0
     field :expires_at, :naive_datetime
     field :status, :string, default: "active"
+    field :points_required, :float, default: 0.0
+    field :is_point_voucher, :boolean, default: false
     field :max_redemptions, :integer, default: 1
     field :redemptions_count, :integer, default: 0
     field :batch_no, :string
@@ -26,6 +28,8 @@ defmodule BlogEngine.Settings.Voucher do
     |> cast(attrs, [
       :code,
       :amount,
+      :points_required,
+      :is_point_voucher,
       :expires_at,
       :status,
       :max_redemptions,

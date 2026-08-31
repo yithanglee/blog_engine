@@ -3553,7 +3553,7 @@ defmodule BlogEngine.Settings do
     Repo.delete(model)
   end
 
-  alias BlogEngine.Settings.UserTopup
+  alias BlogEngine.Settings.{UserTopup, UserPointTransaction}
 
   def list_user_topups() do
     Repo.all(UserTopup)
@@ -3700,7 +3700,8 @@ defmodule BlogEngine.Settings do
           case create_user_topup(%{
                  user_id: user_id,
                  organization_id: organization_id,
-                 balance: 0.0
+                 balance: 0.0,
+                 points_balance: 0.0
                }) do
             {:ok, %UserTopup{} = ut} -> {:ok, ut}
             {:error, cg} -> {:error, cg}
@@ -3725,7 +3726,52 @@ defmodule BlogEngine.Settings do
                                           user_topup: %UserTopup{} = ut,
                                           user_topup_transaction: %UserTopupTransaction{} = trx
                                         } ->
-      UserTopup.changeset(ut, %{balance: trx.after_amt}) |> Repo.update()
+      organization_id = Map.fetch!(params, :organization_id)
+      org = Repo.get(Organization, organization_id)
+      amount = trx.amount || 0.0
+
+      points_per_rm = if org && org.points_per_rm, do: org.points_per_rm, else: 1.0
+      point_enabled = is_nil(org) or org.point_collection_enabled != false
+      skip_points = Map.get(params, :skip_points, false)
+
+      earned_pts =
+        if not skip_points and point_enabled and amount > 0 and points_per_rm > 0 do
+          (amount * points_per_rm) |> to_float_2dp()
+        else
+          0.0
+        end
+
+      before_pts = (ut.points_balance || 0.0) |> to_float_2dp()
+      after_pts = (before_pts + earned_pts) |> to_float_2dp()
+
+      UserTopup.changeset(ut, %{balance: trx.after_amt, points_balance: after_pts}) |> Repo.update()
+    end)
+    |> Multi.run(:point_transaction, fn _repo,
+                                        %{
+                                          user_topup: %UserTopup{} = ut,
+                                          user_topup_transaction: %UserTopupTransaction{} = trx,
+                                          user_topup_update: %UserTopup{} = updated_ut
+                                        } ->
+      earned_pts = (updated_ut.points_balance - (ut.points_balance || 0.0)) |> to_float_2dp()
+
+      if earned_pts > 0 do
+        user_id = Map.fetch!(params, :user_id)
+        organization_id = Map.fetch!(params, :organization_id)
+
+        UserPointTransaction.changeset(%UserPointTransaction{}, %{
+          user_id: user_id,
+          organization_id: organization_id,
+          points: earned_pts,
+          before_points: ut.points_balance || 0.0,
+          after_points: updated_ut.points_balance,
+          transaction_type: "earned",
+          remarks: "Earned #{earned_pts} pts from #{params[:remarks] || "top-up"} (RM #{trx.amount})",
+          user_topup_transaction_id: trx.id
+        })
+        |> Repo.insert()
+      else
+        {:ok, nil}
+      end
     end)
     |> Repo.transaction()
     |> IO.inspect()
@@ -3781,7 +3827,8 @@ defmodule BlogEngine.Settings do
       amount: params[:amount] || params["amount"],
       remarks: params[:remarks] || params["remarks"],
       sales_id: params[:sales_id] || params["sales_id"],
-      device_log_id: params[:device_log_id] || params["device_log_id"]
+      device_log_id: params[:device_log_id] || params["device_log_id"],
+      skip_points: Map.get(params, :skip_points, Map.get(params, "skip_points", false))
     }
   end
 
@@ -4391,6 +4438,283 @@ defmodule BlogEngine.Settings do
 
   defp parse_naive_datetime(_), do: nil
 
+  alias BlogEngine.Settings.{UserPointTransaction}
+
+  @doc """
+  Gets summary of points for a user in an organization.
+  """
+  def get_user_points_summary(user_id, organization_id)
+      when is_integer(user_id) and is_integer(organization_id) do
+    ut = get_user_topup_by_user_and_organization(user_id, organization_id)
+    points_balance = if ut, do: (ut.points_balance || 0.0) |> to_float_2dp(), else: 0.0
+    credit_balance = if ut, do: (ut.balance || 0.0) |> to_float_2dp(), else: 0.0
+
+    org = Repo.get(Organization, organization_id)
+    points_per_rm = if org && org.points_per_rm, do: org.points_per_rm, else: 1.0
+
+    total_earned =
+      Repo.one(
+        from(p in UserPointTransaction,
+          where:
+            p.user_id == ^user_id and p.organization_id == ^organization_id and p.points > 0.0,
+          select: coalesce(sum(p.points), 0.0)
+        )
+      ) || 0.0
+
+    total_redeemed =
+      Repo.one(
+        from(p in UserPointTransaction,
+          where:
+            p.user_id == ^user_id and p.organization_id == ^organization_id and p.points < 0.0,
+          select: coalesce(sum(fragment("abs(?)", p.points)), 0.0)
+        )
+      ) || 0.0
+
+    now = NaiveDateTime.utc_now()
+
+    next_vouchers =
+      Repo.all(
+        from(v in Voucher,
+          where:
+            v.organization_id == ^organization_id and
+              (v.points_required > 0.0 or v.is_point_voucher == true) and
+              v.status == "active" and
+              (is_nil(v.expires_at) or v.expires_at > ^now),
+          order_by: [asc: v.points_required]
+        )
+      )
+
+    next_reward =
+      Enum.find(next_vouchers, fn v -> (v.points_required || 0.0) > points_balance end) ||
+        List.last(next_vouchers)
+
+    target_points = if next_reward, do: (next_reward.points_required || 0.0), else: 100.0
+
+    progress_percent =
+      if target_points > 0 do
+        min(100.0, Float.round((points_balance / target_points) * 100.0, 1))
+      else
+        100.0
+      end
+
+    %{
+      points_balance: points_balance,
+      credit_balance: credit_balance,
+      points_per_rm: points_per_rm,
+      total_earned_points: to_float_2dp(total_earned),
+      total_redeemed_points: to_float_2dp(total_redeemed),
+      next_reward:
+        if next_reward do
+          %{
+            id: next_reward.id,
+            code: next_reward.code,
+            amount: next_reward.amount,
+            points_required: next_reward.points_required,
+            remarks: next_reward.remarks
+          }
+        else
+          nil
+        end,
+      target_points: target_points,
+      points_needed: max(0.0, target_points - points_balance) |> to_float_2dp(),
+      progress_percent: progress_percent
+    }
+  end
+
+  def get_user_points_summary(_, _),
+    do: %{
+      points_balance: 0.0,
+      credit_balance: 0.0,
+      points_per_rm: 1.0,
+      total_earned_points: 0.0,
+      total_redeemed_points: 0.0,
+      next_reward: nil,
+      target_points: 100.0,
+      points_needed: 100.0,
+      progress_percent: 0.0
+    }
+
+  @doc """
+  Lists point vouchers available for redemption by organization users.
+  """
+  def list_point_vouchers_for_user(user_id, organization_id)
+      when is_integer(user_id) and is_integer(organization_id) do
+    ut = get_user_topup_by_user_and_organization(user_id, organization_id)
+    points_balance = if ut, do: (ut.points_balance || 0.0) |> to_float_2dp(), else: 0.0
+    now = NaiveDateTime.utc_now()
+
+    vouchers =
+      Repo.all(
+        from(v in Voucher,
+          where:
+            v.organization_id == ^organization_id and
+              (v.points_required > 0.0 or v.is_point_voucher == true) and
+              v.status == "active" and
+              (is_nil(v.expires_at) or v.expires_at > ^now),
+          order_by: [asc: v.points_required, desc: v.amount]
+        )
+      )
+
+    redeemed_voucher_ids =
+      Repo.all(
+        from(r in VoucherRedemption,
+          where: r.user_id == ^user_id and r.organization_id == ^organization_id,
+          select: r.voucher_id
+        )
+      )
+      |> MapSet.new()
+
+    vouchers
+    |> Enum.map(fn v ->
+      already_redeemed = MapSet.member?(redeemed_voucher_ids, v.id)
+      points_needed = (v.points_required || 0.0) |> to_float_2dp()
+      can_afford = points_balance >= points_needed
+
+      %{
+        id: v.id,
+        code: v.code,
+        amount: v.amount,
+        points_required: points_needed,
+        expires_at: v.expires_at,
+        remarks: v.remarks || "Voucher RM #{v.amount |> to_float_2dp()}",
+        can_redeem: can_afford and not already_redeemed,
+        already_redeemed: already_redeemed,
+        points_needed: max(0.0, points_needed - points_balance) |> to_float_2dp()
+      }
+    end)
+  end
+
+  def list_point_vouchers_for_user(_, _), do: []
+
+  @doc """
+  Redeem a voucher using points.
+  """
+  def redeem_voucher_with_points(user_id, voucher_id_or_code, organization_id \\ nil) do
+    user =
+      case user_id do
+        id when is_integer(id) -> Repo.get(User, id)
+        _ -> nil
+      end
+
+    with %User{} = u <- user || {:error, "User not found"},
+         org_id <- organization_id || u.organization_id || 0,
+         true <- org_id > 0 || {:error, "Organization not specified"},
+         voucher <-
+           find_voucher_by_id_or_code(voucher_id_or_code, org_id) ||
+             {:error, "Voucher not found"},
+         ut <-
+           get_user_topup_by_user_and_organization(u.id, org_id) ||
+             {:error, "User account not initialized"},
+         pts_req <- (voucher.points_required || 0.0) |> to_float_2dp(),
+         true <- pts_req > 0 || {:error, "This voucher cannot be redeemed with points"},
+         user_pts <- (ut.points_balance || 0.0) |> to_float_2dp(),
+         true <-
+           user_pts >= pts_req ||
+             {:error,
+              "Insufficient points. You need #{pts_req} pts, but currently have #{user_pts} pts."},
+         :ok <- validate_voucher_for_redemption(voucher, u.id) do
+      now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+      new_points = (user_pts - pts_req) |> to_float_2dp()
+
+      Multi.new()
+      |> Multi.run(:update_points, fn _repo, _changes ->
+        UserTopup.changeset(ut, %{points_balance: new_points}) |> Repo.update()
+      end)
+      |> Multi.run(:point_transaction, fn _repo, _changes ->
+        UserPointTransaction.changeset(%UserPointTransaction{}, %{
+          user_id: u.id,
+          organization_id: org_id,
+          points: -pts_req,
+          before_points: user_pts,
+          after_points: new_points,
+          transaction_type: "redeemed",
+          remarks:
+            "Redeemed voucher #{voucher.code} (RM #{voucher.amount}) for #{pts_req} pts",
+          voucher_id: voucher.id
+        })
+        |> Repo.insert()
+      end)
+      |> Multi.run(:voucher_redemption, fn _repo, _changes ->
+        VoucherRedemption.changeset(%VoucherRedemption{}, %{
+          voucher_id: voucher.id,
+          user_id: u.id,
+          organization_id: org_id,
+          amount: voucher.amount,
+          redeemed_at: now
+        })
+        |> Repo.insert()
+      end)
+      |> Multi.run(:voucher_update, fn _repo, _changes ->
+        new_count = (voucher.redemptions_count || 0) + 1
+
+        new_status =
+          if new_count >= (voucher.max_redemptions || 1), do: "redeemed", else: voucher.status
+
+        Voucher.changeset(voucher, %{
+          redemptions_count: new_count,
+          status: new_status,
+          redeemed_by_user_id: u.id,
+          redeemed_at: now
+        })
+        |> Repo.update()
+      end)
+      |> Multi.run(:user_topup_transaction, fn _repo, _changes ->
+        create_user_topup_transaction(%{
+          user_id: u.id,
+          organization_id: org_id,
+          amount: voucher.amount,
+          remarks: "Voucher Point Redemption (#{voucher.code})",
+          skip_points: true
+        })
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{user_topup_transaction: trx, voucher_update: updated_voucher}} ->
+          new_bal =
+            case get_user_topup_by_user_and_organization(u.id, org_id) do
+              %UserTopup{balance: b} -> b
+              _ -> trx.after_amt
+            end
+
+          {:ok,
+           %{
+             voucher: updated_voucher,
+             amount: voucher.amount,
+             points_spent: pts_req,
+             points_balance: new_points,
+             new_points_balance: new_points,
+             balance: new_bal,
+             transaction: trx,
+             message:
+               "Successfully redeemed RM #{voucher.amount |> to_float_2dp()} voucher using #{pts_req} points!"
+           }}
+
+        {:error, _step, failed_val, _} ->
+          {:error, "Redemption failed: #{inspect(failed_val)}"}
+      end
+    else
+      {:error, reason} when is_binary(reason) -> {:error, reason}
+      _ -> {:error, "Failed to redeem voucher with points"}
+    end
+  end
+
+  defp find_voucher_by_id_or_code(id, organization_id) when is_integer(id) do
+    Repo.get_by(Voucher, id: id, organization_id: organization_id)
+  end
+
+  defp find_voucher_by_id_or_code(code_str, organization_id) when is_binary(code_str) do
+    case Integer.parse(String.trim(code_str)) do
+      {id, ""} ->
+        Repo.get_by(Voucher, id: id, organization_id: organization_id) ||
+          get_voucher_by_code(code_str, organization_id)
+
+      _ ->
+        get_voucher_by_code(code_str, organization_id)
+    end
+  end
+
+  defp find_voucher_by_id_or_code(_, _), do: nil
+
   defp normalize_voucher_attrs(attrs) when is_map(attrs) do
     attrs
     |> Enum.map(fn
@@ -4398,6 +4722,14 @@ defmodule BlogEngine.Settings do
       {:code, v} -> {:code, if(is_binary(v), do: v |> String.trim() |> String.upcase(), else: v)}
       {"amount", v} -> {:amount, to_float_2dp(v)}
       {:amount, v} -> {:amount, to_float_2dp(v)}
+      {"points_required", v} -> {:points_required, to_float_2dp(v)}
+      {:points_required, v} -> {:points_required, to_float_2dp(v)}
+      {"is_point_voucher", v} ->
+        {:is_point_voucher, if(is_binary(v), do: v in ["true", "1"], else: !!v)}
+
+      {:is_point_voucher, v} ->
+        {:is_point_voucher, if(is_binary(v), do: v in ["true", "1"], else: !!v)}
+
       {"expires_at", v} -> {:expires_at, parse_naive_datetime(v)}
       {:expires_at, v} -> {:expires_at, parse_naive_datetime(v)}
       {k, v} when is_binary(k) -> {String.to_atom(k), v}

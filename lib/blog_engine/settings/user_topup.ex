@@ -3,10 +3,9 @@ defmodule BlogEngine.Settings.UserTopup do
   import Ecto.Changeset
 
   schema "user_topups" do
-    field :balance, :float,default: 0.0
-    # field :organization_id, :integer
+    field :balance, :float, default: 0.0
+    field :points_balance, :float, default: 0.0
     belongs_to :organization, BlogEngine.Settings.Organization
-    # field :user_id, :integer
     belongs_to :user, BlogEngine.Settings.User
 
     timestamps()
@@ -15,7 +14,7 @@ defmodule BlogEngine.Settings.UserTopup do
   @doc false
   def changeset(user_topup, attrs) do
     user_topup
-    |> cast(attrs, [:user_id, :balance, :organization_id])
+    |> cast(attrs, [:user_id, :balance, :organization_id, :points_balance])
     |> validate_required([:user_id, :balance, :organization_id])
   end
 end
