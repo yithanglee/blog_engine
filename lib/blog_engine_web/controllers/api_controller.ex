@@ -1715,6 +1715,87 @@ defmodule BlogEngineWeb.ApiController do
               %{status: "error", message: inspect(reason)}
           end
 
+        "issue_voucher_to_member" ->
+          target_user_id =
+            case params["user_id"] || params["target_user_id"] do
+              id when is_integer(id) -> id
+              id when is_binary(id) ->
+                case Integer.parse(String.trim(id)) do
+                  {i, _} -> i
+                  _ -> nil
+                end
+              _ -> nil
+            end
+
+          target_user = if target_user_id, do: Settings.get_user(target_user_id), else: nil
+
+          org_id =
+            case Map.get(params, "organization_id") do
+              v when is_integer(v) -> v
+              v when is_binary(v) ->
+                case Integer.parse(String.trim(v)) do
+                  {i, _} -> i
+                  _ -> target_user && target_user.organization_id
+                end
+              _ -> target_user && target_user.organization_id
+            end
+
+          voucher_code =
+            cond do
+              is_binary(params["code"]) and String.trim(params["code"]) != "" ->
+                String.trim(params["code"])
+
+              is_binary(params["voucher_code"]) and String.trim(params["voucher_code"]) != "" ->
+                String.trim(params["voucher_code"])
+
+              params["voucher_id"] ->
+                vid =
+                  case params["voucher_id"] do
+                    i when is_integer(i) -> i
+                    s when is_binary(s) ->
+                      case Integer.parse(String.trim(s)) do
+                        {i, _} -> i
+                        _ -> nil
+                      end
+                    _ -> nil
+                  end
+
+                case vid && Settings.get_voucher(vid) do
+                  %BlogEngine.Settings.Voucher{code: c} -> c
+                  _ -> nil
+                end
+
+              true ->
+                nil
+            end
+
+          cond do
+            is_nil(target_user) ->
+              %{status: "error", message: "Target member not found"}
+
+            is_nil(voucher_code) or voucher_code == "" ->
+              %{status: "error", message: "Voucher code is required"}
+
+            is_nil(org_id) or org_id <= 0 ->
+              %{status: "error", message: "Organization not specified"}
+
+            true ->
+              case Settings.redeem_voucher(target_user.id, voucher_code, org_id) do
+                {:ok, res} ->
+                  %{
+                    status: "ok",
+                    message: "Voucher #{res.voucher.code} successfully issued to member!",
+                    amount: res.amount,
+                    balance: res.balance,
+                    code: res.voucher.code,
+                    user_id: target_user.id
+                  }
+
+                {:error, reason} ->
+                  %{status: "error", message: reason}
+              end
+          end
+
         "delete_user_data" ->
           session = params["user_token"] |> BlogEngine.Settings.get_cookie_user_by_cookie()
 
