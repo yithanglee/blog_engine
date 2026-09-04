@@ -4678,12 +4678,47 @@ defmodule BlogEngine.Settings do
         amount: (v && v.amount) || 0.0,
         remarks: (v && v.remarks) || "",
         image_url: (v && v.image_url) || nil,
-        points_required: (v && v.points_required) || 0.0
+        points_required: (v && v.points_required) || 0.0,
+        voucher:
+          if v do
+            %{
+              id: v.id,
+              code: v.code,
+              amount: v.amount,
+              remarks: v.remarks,
+              image_url: v.image_url,
+              points_required: v.points_required,
+              status: v.status,
+              expires_at: v.expires_at
+            }
+          else
+            nil
+          end
       }
     end)
   end
 
   def list_user_vouchers_for_user(_, _), do: []
+
+  @doc """
+  Gets a single user_voucher with preloaded voucher association.
+  """
+  def get_user_voucher!(id) do
+    Repo.get!(UserVoucher, id)
+    |> Repo.preload([:voucher, :user, :organization])
+  end
+
+  def get_user_voucher(id) do
+    case Repo.get(UserVoucher, id) do
+      nil -> nil
+      uv -> Repo.preload(uv, [:voucher, :user, :organization])
+    end
+  end
+
+  def list_user_vouchers do
+    from(uv in UserVoucher, preload: [:voucher, :user, :organization], order_by: [desc: uv.inserted_at])
+    |> Repo.all()
+  end
 
   @doc """
   Redeems a UserVoucher record by ID or code, crediting user_topup tokens balance.

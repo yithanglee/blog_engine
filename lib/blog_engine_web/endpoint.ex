@@ -25,7 +25,8 @@ defmodule BlogEngineWeb.Endpoint do
     at: "/",
     from: :blog_engine,
     gzip: false,
-    only: ~w(sw.js  js  css fonts images vendor  favicon.ico webfonts robots.txt)
+    only: ~w(sw.js  js  css fonts images vendor  favicon.ico webfonts robots.txt),
+    headers: [{"access-control-allow-origin", "*"}]
 
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.
