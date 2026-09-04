@@ -2848,6 +2848,7 @@ defmodule BlogEngineWeb.ApiController do
           params
           |> normalize_firebase_signin_payload()
           |> Settings.sign_in_with_firebase()
+          |> IO.inspect(label: "DEBUG_FIREBASE_SIGNIN")
           |> case do
             {:ok, %{user: u}} ->
               %{status: "ok", res: u}
@@ -2859,10 +2860,35 @@ defmodule BlogEngineWeb.ApiController do
         "google_signin" ->
           params
           |> normalize_firebase_signin_payload()
+          |> then(fn p ->
+            org = params["organization_id"] || params["org_id"] || get_in(params, ["result", "organization_id"])
+            if org, do: Map.put(p, "organization_id", org), else: p
+          end)
           |> Settings.sign_in_with_firebase()
           |> case do
-            {:ok, %{user: u}} ->
-              %{status: "ok", res: u}
+            {:ok, %{user: u} = res_map} ->
+              user_id = Map.get(res_map, :id) || Map.get(u, :id) || Map.get(u, "id")
+              token =
+                case Map.get(res_map, :token) || Map.get(u, :token) || Map.get(u, "token") do
+                  t when is_binary(t) and t != "" -> t
+                  _ ->
+                    if user_id do
+                      t = Settings.member_token(user_id)
+                      Settings.create_session_user(%{"cookie" => t, "user_id" => user_id})
+                      t
+                    else
+                      ""
+                    end
+                end
+
+              %{
+                status: "ok",
+                res: token,
+                user: u |> BluePotion.sanitize_struct(),
+                id: user_id,
+                user_id: user_id,
+                role_app_routes: []
+              }
 
             {:error, reason} ->
               %{status: "error", reason: firebase_signin_error_message(reason)}
@@ -3377,15 +3403,19 @@ defmodule BlogEngineWeb.ApiController do
     params = Map.delete(params, "model") |> Map.delete("preloads") |> Map.delete("host")
 
     search_queries =
-      for key <- params["columns"] |> Map.keys() do
-        val = params["columns"][key]["search"]["value"]
+      if is_map(params["columns"]) do
+        for key <- params["columns"] |> Map.keys() do
+          val = params["columns"][key]["search"]["value"]
 
-        if val != "" do
-          {String.to_atom(params["columns"][key]["data"]), val}
+          if val != "" do
+            {String.to_atom(params["columns"][key]["data"]), val}
+          end
         end
+        |> Enum.reject(fn x -> x == nil end)
+        |> Enum.reject(fn x -> elem(x, 1) == nil end)
+      else
+        []
       end
-      |> Enum.reject(fn x -> x == nil end)
-      |> Enum.reject(fn x -> elem(x, 1) == nil end)
 
     additional_search_params =
       params
