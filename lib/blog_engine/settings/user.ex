@@ -18,7 +18,9 @@ defmodule BlogEngine.Settings.User do
     field(:ic_no, :string)
     field(:phone, :string)
     field(:username, :string)
+    field(:firebase_auth_id, :string)
     belongs_to(:organization, BlogEngine.Settings.Organization)
+    has_many(:user_vouchers, BlogEngine.Settings.UserVoucher, on_delete: :delete_all)
     timestamps()
   end
 
@@ -39,7 +41,8 @@ defmodule BlogEngine.Settings.User do
       :blocked,
       :bank_account_holder,
       :bank_account_no,
-      :bank_name
+      :bank_name,
+      :firebase_auth_id
     ])
     |> validate_required([
       # :email,

@@ -19,6 +19,7 @@ defmodule BlogEngine.Settings.Voucher do
     belongs_to :organization, BlogEngine.Settings.Organization
     belongs_to :redeemed_by_user, BlogEngine.Settings.User, foreign_key: :redeemed_by_user_id
     has_many :voucher_redemptions, BlogEngine.Settings.VoucherRedemption, on_delete: :delete_all
+    has_many :user_vouchers, BlogEngine.Settings.UserVoucher, on_delete: :delete_all
 
     timestamps()
   end

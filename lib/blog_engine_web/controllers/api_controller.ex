@@ -151,6 +151,7 @@ defmodule BlogEngineWeb.ApiController do
   end
 
   def get(conn, params) do
+    params = extract_auth_token_from_conn(conn, params)
     # can get data from conn.private.plug_session
     token = params |> Map.get("token")
 
@@ -219,6 +220,82 @@ defmodule BlogEngineWeb.ApiController do
 
             _ ->
               %{status: "error", message: "Unauthorized"}
+          end
+
+        "list_user_vouchers" ->
+          user = resolve_user_from_params(params)
+
+          case user do
+            %BlogEngine.Settings.User{} = u ->
+              org_id =
+                case Map.get(params, "organization_id") do
+                  v when is_integer(v) ->
+                    v
+
+                  v when is_binary(v) ->
+                    case Integer.parse(String.trim(v)) do
+                      {i, _} -> i
+                      _ -> u.organization_id
+                    end
+
+                  _ ->
+                    u.organization_id
+                end
+
+              user_vouchers = Settings.list_user_vouchers_for_user(u.id, org_id)
+              ut = Settings.get_user_topup_by_user_and_organization(u.id, org_id)
+              balance = if ut, do: ut.balance || 0.0, else: 0.0
+
+              %{
+                status: "ok",
+                user_vouchers: user_vouchers,
+                balance: balance
+              }
+
+            _ ->
+              %{status: "error", message: "Unauthorized"}
+          end
+
+        "redeem_user_voucher" ->
+          user = resolve_user_from_params(params)
+
+          case user do
+            %BlogEngine.Settings.User{} = u ->
+              uv_id_or_code =
+                params["user_voucher_id"] || params["id"] || params["code"] || params["voucher_code"]
+
+              org_id =
+                case Map.get(params, "organization_id") do
+                  v when is_integer(v) ->
+                    v
+
+                  v when is_binary(v) ->
+                    case Integer.parse(String.trim(v)) do
+                      {i, _} -> i
+                      _ -> u.organization_id
+                    end
+
+                  _ ->
+                    u.organization_id
+                end
+
+              case Settings.redeem_user_voucher(u.id, uv_id_or_code, org_id) do
+                {:ok, res} ->
+                  %{
+                    status: "ok",
+                    message: res.message,
+                    amount: res.amount,
+                    balance: res.balance,
+                    code: res.voucher.code,
+                    user_voucher_id: res.user_voucher.id
+                  }
+
+                {:error, reason} ->
+                  %{status: "error", message: reason}
+              end
+
+            _ ->
+              %{status: "error", message: "Unauthorized or invalid user session"}
           end
 
         "redeem_voucher" ->
@@ -1621,8 +1698,86 @@ defmodule BlogEngineWeb.ApiController do
   defp delete_user_data_for_member(_), do: %{status: "error", message: "Invalid user"}
 
   def post(conn, params) do
+    params = extract_auth_token_from_conn(conn, params)
+
     res =
       case params["scope"] do
+        "list_user_vouchers" ->
+          user = resolve_user_from_params(params)
+
+          case user do
+            %BlogEngine.Settings.User{} = u ->
+              org_id =
+                case Map.get(params, "organization_id") do
+                  v when is_integer(v) ->
+                    v
+
+                  v when is_binary(v) ->
+                    case Integer.parse(String.trim(v)) do
+                      {i, _} -> i
+                      _ -> u.organization_id
+                    end
+
+                  _ ->
+                    u.organization_id
+                end
+
+              user_vouchers = Settings.list_user_vouchers_for_user(u.id, org_id)
+              ut = Settings.get_user_topup_by_user_and_organization(u.id, org_id)
+              balance = if ut, do: ut.balance || 0.0, else: 0.0
+
+              %{
+                status: "ok",
+                user_vouchers: user_vouchers,
+                balance: balance
+              }
+
+            _ ->
+              %{status: "error", message: "Unauthorized"}
+          end
+
+        "redeem_user_voucher" ->
+          user = resolve_user_from_params(params)
+
+          case user do
+            %BlogEngine.Settings.User{} = u ->
+              uv_id_or_code =
+                params["user_voucher_id"] || params["id"] || params["code"] || params["voucher_code"]
+
+              org_id =
+                case Map.get(params, "organization_id") do
+                  v when is_integer(v) ->
+                    v
+
+                  v when is_binary(v) ->
+                    case Integer.parse(String.trim(v)) do
+                      {i, _} -> i
+                      _ -> u.organization_id
+                    end
+
+                  _ ->
+                    u.organization_id
+                end
+
+              case Settings.redeem_user_voucher(u.id, uv_id_or_code, org_id) do
+                {:ok, res} ->
+                  %{
+                    status: "ok",
+                    message: res.message,
+                    amount: res.amount,
+                    balance: res.balance,
+                    code: res.voucher.code,
+                    user_voucher_id: res.user_voucher.id
+                  }
+
+                {:error, reason} ->
+                  %{status: "error", message: reason}
+              end
+
+            _ ->
+              %{status: "error", message: "Unauthorized or invalid user session"}
+          end
+
         "redeem_voucher_with_points" ->
           user = resolve_user_from_params(params)
 
@@ -1780,15 +1935,15 @@ defmodule BlogEngineWeb.ApiController do
               %{status: "error", message: "Organization not specified"}
 
             true ->
-              case Settings.redeem_voucher(target_user.id, voucher_code, org_id) do
+              case Settings.issue_voucher_to_user(target_user.id, voucher_code, org_id) do
                 {:ok, res} ->
                   %{
                     status: "ok",
-                    message: "Voucher #{res.voucher.code} successfully issued to member!",
+                    message: res.message,
                     amount: res.amount,
-                    balance: res.balance,
-                    code: res.voucher.code,
-                    user_id: target_user.id
+                    code: res.code,
+                    user_id: target_user.id,
+                    user_voucher_id: res.user_voucher.id
                   }
 
                 {:error, reason} ->
@@ -4992,16 +5147,34 @@ defmodule BlogEngineWeb.ApiController do
     end
   end
 
-  defp resolve_user_from_params(params) when is_map(params) do
-    cond do
-      is_binary(params["token"]) and String.trim(params["token"]) != "" ->
-        case Settings.decode_token(String.trim(params["token"])) do
-          %{id: uid} when is_integer(uid) and uid > 0 -> Settings.get_user(uid)
-          _ -> nil
-        end
+  defp extract_auth_token_from_conn(conn, params) do
+    auth_header =
+      case Plug.Conn.get_req_header(conn, "authorization") do
+        ["Basic " <> token] -> String.trim(token)
+        ["Bearer " <> token] -> String.trim(token)
+        [token] when is_binary(token) and token != "" -> String.trim(token)
+        _ -> nil
+      end
 
-      is_binary(params["user_token"]) and String.trim(params["user_token"]) != "" ->
-        case Settings.get_cookie_user_by_cookie(String.trim(params["user_token"])) do
+    cond do
+      is_binary(auth_header) and auth_header != "" and
+          (is_nil(params["token"]) or params["token"] == "") ->
+        Map.put(params, "token", auth_header)
+
+      true ->
+        params
+    end
+  end
+
+  defp resolve_user_from_params(params) when is_map(params) do
+    raw_token =
+      params["token"] || params["user_token"] || params["cookie"] || params["authorizationToken"]
+
+    cond do
+      is_binary(raw_token) and String.trim(raw_token) != "" ->
+        trimmed = String.trim(raw_token)
+
+        case Settings.get_cookie_user_by_cookie(trimmed) do
           %{user: %BlogEngine.Settings.User{} = u} ->
             u
 
@@ -5009,7 +5182,7 @@ defmodule BlogEngineWeb.ApiController do
             u
 
           _ ->
-            case Settings.decode_token(String.trim(params["user_token"])) do
+            case Settings.decode_token(trimmed) do
               %{id: uid} when is_integer(uid) and uid > 0 -> Settings.get_user(uid)
               _ -> nil
             end

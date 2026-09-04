@@ -1237,14 +1237,14 @@ defmodule BlogEngine.Settings do
     case user do
       {:ok, u} ->
         u = maybe_update_profile_from_firebase(u, attrs)
-        issue_member_session(u)
+        issue_oauth_member_session(u)
 
       {:needs_link, %User{} = u} ->
         case User.changeset(u, %{firebase_auth_id: uid}) |> Repo.update() do
           {:ok, u} ->
             u = u |> Repo.preload([:organization])
             u = maybe_update_profile_from_firebase(u, attrs)
-            issue_member_session(u)
+            issue_oauth_member_session(u)
 
           {:error, changeset} ->
             {:error, {:could_not_link_firebase, changeset}}
@@ -1254,7 +1254,40 @@ defmodule BlogEngine.Settings do
         {:error, :firebase_user_needs_email}
 
       {:missing, nil} ->
-        {:error, :no_account_for_firebase}
+        username = unique_member_username(email)
+
+        attrs_user =
+          %{
+            "username" => username,
+            "email" => email,
+            "fullname" => attrs["name"] || attrs["displayName"] || username,
+            "firebase_auth_id" => uid
+          }
+          |> then(fn a ->
+            org_id = attrs["organization_id"] || attrs["org_id"]
+
+            org_id =
+              cond do
+                is_integer(org_id) -> org_id
+                is_binary(org_id) ->
+                  case Integer.parse(org_id) do
+                    {n, _} -> n
+                    _ -> nil
+                  end
+                true -> nil
+              end
+
+            if is_integer(org_id), do: Map.put(a, "organization_id", org_id), else: a
+          end)
+
+        case create_user(attrs_user) do
+          {:ok, u} ->
+            u = u |> Repo.preload([:organization])
+            issue_oauth_member_session(u)
+
+          {:error, changeset} ->
+            {:error, {:could_not_link_firebase, changeset}}
+        end
     end
   end
 
@@ -1288,7 +1321,7 @@ defmodule BlogEngine.Settings do
     end
   end
 
-  defp issue_member_session(%User{} = user) do
+  defp issue_oauth_member_session(%User{} = user) do
     user = Repo.preload(user, [:merchant, :rank, :stockist_users])
     token = member_token(user.id)
     create_session_user(%{"cookie" => token, "user_id" => user.id})
@@ -4118,7 +4151,7 @@ defmodule BlogEngine.Settings do
     |> Repo.insert()
   end
 
-  alias BlogEngine.Settings.{Voucher, VoucherRedemption}
+  alias BlogEngine.Settings.{Voucher, VoucherRedemption, UserVoucher}
 
   def list_vouchers do
     Repo.all(from(v in Voucher, order_by: [desc: v.inserted_at]))
@@ -4334,6 +4367,22 @@ defmodule BlogEngine.Settings do
         })
         |> Repo.update()
       end)
+      |> Multi.run(:user_voucher_update, fn _repo, _changes ->
+        case Repo.one(
+               from(uv in UserVoucher,
+                 where:
+                   uv.user_id == ^u.id and uv.voucher_id == ^voucher.id and uv.status == "issued",
+                 limit: 1
+               )
+             ) do
+          nil ->
+            {:ok, nil}
+
+          uv ->
+            UserVoucher.changeset(uv, %{status: "redeemed", redeemed_at: now})
+            |> Repo.update()
+        end
+      end)
       |> Multi.run(:user_topup_transaction, fn _repo, _changes ->
         create_user_topup_transaction(%{
           user_id: u.id,
@@ -4391,7 +4440,7 @@ defmodule BlogEngine.Settings do
     now = NaiveDateTime.utc_now()
 
     cond do
-      voucher.status != "active" ->
+      voucher.status not in ["active", "issued"] ->
         {:error, "Voucher is not active or has already been redeemed"}
 
       voucher.expires_at != nil and NaiveDateTime.compare(voucher.expires_at, now) == :lt ->
@@ -4456,6 +4505,369 @@ defmodule BlogEngine.Settings do
   end
 
   defp parse_naive_datetime(_), do: nil
+
+  @doc """
+  Issues an existing active voucher to a user (organization member).
+  Creates a UserVoucher record in "issued" status so the member can view and redeem it.
+  """
+  def issue_voucher_to_user(user_id, voucher_code_or_id, organization_id \\ nil) do
+    user =
+      case user_id do
+        id when is_integer(id) -> Repo.get(User, id)
+        _ -> nil
+      end
+
+    with %User{} = u <- user || {:error, "Member not found"},
+         org_id <- organization_id || u.organization_id || 0,
+         true <- org_id > 0 || {:error, "Organization not specified"},
+         %Voucher{} = voucher <-
+           find_voucher_for_org(voucher_code_or_id, org_id) ||
+             {:error, "Voucher not found for this organization"},
+         :ok <- validate_voucher_for_issuance(voucher, u.id) do
+      attrs = %{
+        user_id: u.id,
+        voucher_id: voucher.id,
+        organization_id: org_id,
+        status: "issued",
+        expires_at: voucher.expires_at
+      }
+
+      %UserVoucher{}
+      |> UserVoucher.changeset(attrs)
+      |> Repo.insert()
+      |> case do
+        {:ok, uv} ->
+          uv = Repo.preload(uv, [:voucher, :user])
+
+          {:ok,
+           %{
+             user_voucher: uv,
+             voucher: voucher,
+             user: u,
+             code: voucher.code,
+             amount: voucher.amount,
+             message:
+               "Voucher #{voucher.code} successfully issued to #{u.fullname || u.username}."
+           }}
+
+        {:error, cs} ->
+          {:error, cs}
+      end
+    else
+      {:error, reason} when is_binary(reason) -> {:error, reason}
+      nil -> {:error, "Voucher not found"}
+      _ -> {:error, "Failed to issue voucher to member"}
+    end
+  end
+
+  defp find_voucher_for_org(code_or_id, org_id) do
+    case code_or_id do
+      id when is_integer(id) ->
+        Repo.one(from(v in Voucher, where: v.id == ^id and v.organization_id == ^org_id, limit: 1))
+
+      str when is_binary(str) ->
+        trimmed = String.trim(str)
+
+        case Integer.parse(trimmed) do
+          {int_id, ""} ->
+            Repo.one(
+              from(v in Voucher,
+                where:
+                  (v.id == ^int_id or
+                     fragment("UPPER(TRIM(?)) = ?", v.code, ^String.upcase(trimmed))) and
+                    v.organization_id == ^org_id,
+                limit: 1
+              )
+            )
+
+          _ ->
+            get_voucher_by_code(trimmed, org_id)
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp validate_voucher_for_issuance(%Voucher{} = voucher, user_id) do
+    now = NaiveDateTime.utc_now()
+
+    cond do
+      voucher.status not in ["active", "issued"] ->
+        {:error, "Voucher is not active (status: #{voucher.status})"}
+
+      voucher.expires_at != nil and NaiveDateTime.compare(voucher.expires_at, now) == :lt ->
+        {:error, "Voucher has already expired"}
+
+      (voucher.redemptions_count || 0) >= (voucher.max_redemptions || 1) ->
+        {:error, "Voucher has already reached its maximum redemptions"}
+
+      true ->
+        existing_active_issue =
+          Repo.one(
+            from(uv in UserVoucher,
+              where:
+                uv.user_id == ^user_id and uv.voucher_id == ^voucher.id and uv.status == "issued",
+              limit: 1
+            )
+          )
+
+        already_redeemed =
+          Repo.one(
+            from(r in VoucherRedemption,
+              where: r.user_id == ^user_id and r.voucher_id == ^voucher.id,
+              limit: 1
+            )
+          )
+
+        cond do
+          existing_active_issue != nil ->
+            {:error,
+             "This voucher has already been issued to this member and is waiting to be redeemed."}
+
+          already_redeemed != nil ->
+            {:error, "This member has already redeemed this voucher."}
+
+          true ->
+            :ok
+        end
+    end
+  end
+
+  @doc """
+  Lists vouchers assigned to / redeemed by a user.
+  """
+  def list_user_vouchers_for_user(user_id, organization_id)
+      when is_integer(user_id) and is_integer(organization_id) do
+    now = NaiveDateTime.utc_now()
+
+    query =
+      from(uv in UserVoucher,
+        where: uv.user_id == ^user_id and uv.organization_id == ^organization_id,
+        preload: [:voucher],
+        order_by: [desc: uv.inserted_at]
+      )
+
+    Repo.all(query)
+    |> Enum.map(fn uv ->
+      v = uv.voucher
+
+      is_expired =
+        uv.status == "issued" and
+          ((uv.expires_at != nil and NaiveDateTime.compare(uv.expires_at, now) == :lt) or
+             (v && v.expires_at != nil and NaiveDateTime.compare(v.expires_at, now) == :lt))
+
+      effective_status =
+        if is_expired do
+          "expired"
+        else
+          uv.status
+        end
+
+      %{
+        id: uv.id,
+        user_id: uv.user_id,
+        voucher_id: uv.voucher_id,
+        organization_id: uv.organization_id,
+        status: effective_status,
+        expires_at: uv.expires_at || (v && v.expires_at),
+        redeemed_at: uv.redeemed_at,
+        inserted_at: uv.inserted_at,
+        can_redeem: effective_status == "issued",
+        code: (v && v.code) || "",
+        amount: (v && v.amount) || 0.0,
+        remarks: (v && v.remarks) || "",
+        image_url: (v && v.image_url) || nil,
+        points_required: (v && v.points_required) || 0.0
+      }
+    end)
+  end
+
+  def list_user_vouchers_for_user(_, _), do: []
+
+  @doc """
+  Redeems a UserVoucher record by ID or code, crediting user_topup tokens balance.
+  """
+  def redeem_user_voucher(user_id, user_voucher_id_or_code, organization_id \\ nil) do
+    user =
+      case user_id do
+        id when is_integer(id) -> Repo.get(User, id)
+        _ -> nil
+      end
+
+    with %User{} = u <- user || {:error, "User not found"},
+         org_id <- organization_id || u.organization_id || 0,
+         true <- org_id > 0 || {:error, "Organization not specified"},
+         %UserVoucher{} = uv <-
+           find_user_voucher_for_redemption(u.id, user_voucher_id_or_code, org_id) ||
+             {:error, "Voucher not found or not assigned to your account"},
+         %Voucher{} = voucher <-
+           (uv.voucher || Repo.get(Voucher, uv.voucher_id)) ||
+             {:error, "Underlying voucher not found"},
+         :ok <- validate_user_voucher_can_be_redeemed(uv, voucher) do
+      now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+      Multi.new()
+      |> Multi.run(:update_user_voucher, fn _repo, _changes ->
+        UserVoucher.changeset(uv, %{
+          status: "redeemed",
+          redeemed_at: now
+        })
+        |> Repo.update()
+      end)
+      |> Multi.run(:voucher_redemption, fn _repo, _changes ->
+        VoucherRedemption.changeset(%VoucherRedemption{}, %{
+          voucher_id: voucher.id,
+          user_id: u.id,
+          organization_id: org_id,
+          amount: voucher.amount,
+          redeemed_at: now
+        })
+        |> Repo.insert()
+      end)
+      |> Multi.run(:voucher_update, fn _repo, _changes ->
+        new_count = (voucher.redemptions_count || 0) + 1
+
+        new_status =
+          if new_count >= (voucher.max_redemptions || 1), do: "redeemed", else: voucher.status
+
+        Voucher.changeset(voucher, %{
+          redemptions_count: new_count,
+          status: new_status,
+          redeemed_by_user_id: u.id,
+          redeemed_at: now
+        })
+        |> Repo.update()
+      end)
+      |> Multi.run(:user_topup_transaction, fn _repo, _changes ->
+        create_user_topup_transaction(%{
+          user_id: u.id,
+          organization_id: org_id,
+          amount: voucher.amount,
+          remarks: "Voucher Redeem (#{voucher.code})"
+        })
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{user_topup_transaction: trx, update_user_voucher: updated_uv}} ->
+          new_bal =
+            case get_user_topup_by_user_and_organization(u.id, org_id) do
+              %UserTopup{balance: b} -> b
+              _ -> trx.after_amt
+            end
+
+          {:ok,
+           %{
+             user_voucher: updated_uv,
+             voucher: voucher,
+             amount: voucher.amount,
+             transaction: trx,
+             balance: new_bal,
+             message:
+               "Voucher #{voucher.code} redeemed successfully! Added RM #{voucher.amount |> to_float_2dp()} to credits."
+           }}
+
+        {:error, _step, failed_val, _} ->
+          error_msg =
+            case failed_val do
+              %Ecto.Changeset{} = cs ->
+                Ecto.Changeset.traverse_errors(cs, fn {msg, _} -> msg end) |> inspect()
+
+              msg when is_binary(msg) ->
+                msg
+
+              other ->
+                inspect(other)
+            end
+
+          {:error, "Redemption failed: #{error_msg}"}
+      end
+    else
+      {:error, reason} when is_binary(reason) -> {:error, reason}
+      nil -> {:error, "Voucher not found"}
+      _ -> {:error, "Failed to redeem voucher"}
+    end
+  end
+
+  defp find_user_voucher_for_redemption(user_id, id_or_code, org_id) do
+    case id_or_code do
+      id when is_integer(id) ->
+        Repo.one(
+          from(uv in UserVoucher,
+            where: uv.id == ^id and uv.user_id == ^user_id and uv.organization_id == ^org_id,
+            preload: [:voucher],
+            limit: 1
+          )
+        )
+
+      str when is_binary(str) ->
+        trimmed = String.trim(str)
+
+        case Integer.parse(trimmed) do
+          {int_id, ""} ->
+            Repo.one(
+              from(uv in UserVoucher,
+                where:
+                  uv.id == ^int_id and uv.user_id == ^user_id and uv.organization_id == ^org_id,
+                preload: [:voucher],
+                limit: 1
+              )
+            ) ||
+              Repo.one(
+                from(uv in UserVoucher,
+                  join: v in assoc(uv, :voucher),
+                  where:
+                    uv.user_id == ^user_id and uv.organization_id == ^org_id and
+                      fragment("UPPER(TRIM(?)) = ?", v.code, ^String.upcase(trimmed)),
+                  preload: [:voucher],
+                  limit: 1
+                )
+              )
+
+          _ ->
+            Repo.one(
+              from(uv in UserVoucher,
+                join: v in assoc(uv, :voucher),
+                where:
+                  uv.user_id == ^user_id and uv.organization_id == ^org_id and
+                    fragment("UPPER(TRIM(?)) = ?", v.code, ^String.upcase(trimmed)),
+                preload: [:voucher],
+                limit: 1
+              )
+            )
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp validate_user_voucher_can_be_redeemed(%UserVoucher{} = uv, %Voucher{} = voucher) do
+    now = NaiveDateTime.utc_now()
+
+    cond do
+      uv.status == "redeemed" ->
+        {:error, "This voucher has already been redeemed"}
+
+      uv.status != "issued" ->
+        {:error, "This voucher is not eligible for redemption (status: #{uv.status})"}
+
+      uv.expires_at != nil and NaiveDateTime.compare(uv.expires_at, now) == :lt ->
+        {:error, "This voucher has expired"}
+
+      voucher.expires_at != nil and NaiveDateTime.compare(voucher.expires_at, now) == :lt ->
+        {:error, "This voucher has expired"}
+
+      voucher.status not in ["active", "issued"] ->
+        {:error, "The underlying voucher is no longer active"}
+
+      (voucher.redemptions_count || 0) >= (voucher.max_redemptions || 1) ->
+        {:error, "Voucher redemption limit has been reached"}
+
+      true ->
+        :ok
+    end
+  end
 
   alias BlogEngine.Settings.{UserPointTransaction, OrganizationRedemptionRule}
 
