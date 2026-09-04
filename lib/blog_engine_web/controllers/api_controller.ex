@@ -3701,88 +3701,160 @@ defmodule BlogEngineWeb.ApiController do
       decode_token.(params)
       |> IO.inspect()
 
-    additional_join_statements =
-      if additional_join_statements == nil do
-        ""
+    raw_join_statements = additional_join_statements
+    target_module = Module.concat(["BlogEngine", "Settings", model])
+
+    model_assocs =
+      if Code.ensure_compiled(target_module) == {:module, target_module} and
+           function_exported?(target_module, :__schema__, 1) do
+        target_module.__schema__(:associations) |> Enum.map(&to_string/1)
       else
-        joins = additional_join_statements |> Poison.decode!() |> IO.inspect()
-
-        for join <- joins do
-          key = Map.keys(join) |> List.first()
-          value = join |> Map.get(key)
-
-          config = Application.get_env(:blue_potion, :contexts)
-
-          mods =
-            if config == nil do
-              ["Settings", "Secretary"]
-            else
-              config
-            end
-
-          struct =
-            for mod <- mods do
-              Module.concat([Application.get_env(:blue_potion, :otp_app), mod, key])
-            end
-            |> Enum.filter(&(elem(Code.ensure_compiled(&1), 0) == :module))
-            |> List.first()
-
-          "|> join(:left, [a], b in assoc(a, :#{key}))"
-        end
-        |> Enum.join("")
-        |> IO.inspect()
+        []
       end
+
+    explicit_joins =
+      cond do
+        is_binary(raw_join_statements) and raw_join_statements not in ["", "null", "nil"] ->
+          case Jason.decode(raw_join_statements) do
+            {:ok, list} when is_list(list) -> list
+            _ -> []
+          end
+
+        is_list(raw_join_statements) ->
+          raw_join_statements
+
+        true ->
+          []
+      end
+
+    explicit_jkeys =
+      explicit_joins
+      |> Enum.map(fn join ->
+        if is_map(join), do: join |> Map.keys() |> List.first() |> to_string(), else: nil
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    search_prefixes =
+      if is_binary(additional_search_queries) and additional_search_queries != "" do
+        additional_search_queries
+        |> String.split([",", "|"])
+        |> Enum.map(fn item ->
+          item = item |> String.replace(["^", "!"], "")
+
+          case String.split(item, ".") do
+            [prefix, _rest] -> prefix |> String.trim()
+            _ -> nil
+          end
+        end)
+        |> Enum.reject(&is_nil/1)
+      else
+        []
+      end
+
+    raw_order_statements = Map.get(params, "additional_order_statements", [])
+
+    order_items =
+      cond do
+        is_binary(raw_order_statements) and raw_order_statements not in ["", "null", "nil"] ->
+          case Jason.decode(raw_order_statements) do
+            {:ok, list} when is_list(list) -> list
+            _ -> []
+          end
+
+        is_list(raw_order_statements) ->
+          raw_order_statements
+
+        true ->
+          []
+      end
+
+    order_prefixes =
+      order_items
+      |> Enum.map(fn item ->
+        col = Map.get(item, "column", "")
+
+        case String.split(to_string(col), ".") do
+          [prefix, _rest] -> String.trim(prefix)
+          _ -> nil
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    search_map_prefixes =
+      case get_in(params, ["search", "value"]) do
+        val_map when is_map(val_map) ->
+          val_map
+          |> Map.keys()
+          |> Enum.map(fn k ->
+            case String.split(to_string(k), ".") do
+              [prefix, _rest] -> String.trim(prefix)
+              _ -> nil
+            end
+          end)
+          |> Enum.reject(&is_nil/1)
+
+        _ ->
+          []
+      end
+
+    referenced_assocs =
+      (search_prefixes ++ order_prefixes ++ search_map_prefixes)
+      |> Enum.filter(&(&1 in model_assocs))
+      |> Enum.uniq()
+
+    auto_jkeys = referenced_assocs -- explicit_jkeys
+    jkeys = (explicit_jkeys ++ auto_jkeys) |> Enum.take(3)
+    join_bindings = ["b", "c", "d"]
+
+    additional_join_statements =
+      jkeys
+      |> Enum.with_index()
+      |> Enum.map(fn {key, idx} ->
+        binding = Enum.at(join_bindings, idx)
+        "|> join(:left, [a], #{binding} in assoc(a, :#{key}))"
+      end)
+      |> Enum.join("")
 
     Logger.info("additional_join_statements - #{additional_join_statements}")
-    additional_order_statements = Map.get(params, "additional_order_statements", [])
 
-    jkeys =
-      if params["additional_join_statements"] != nil do
-        params["additional_join_statements"]
-        |> Jason.decode!()
-        |> Enum.map(&(&1 |> Map.keys() |> List.first()))
-        |> IO.inspect()
-      else
-        []
+    resolve_prefix = fn prefix ->
+      cond do
+        prefix in ["a", "b", "c", "d"] ->
+          prefix
+
+        prefix in jkeys ->
+          idx = Enum.find_index(jkeys, &(&1 == prefix))
+          Enum.at(join_bindings, idx)
+
+        true ->
+          "a"
       end
-
-    additional_order_statements =
-      if additional_order_statements != [] do
-        for item <- additional_order_statements |> Jason.decode!() do
-          sample = %{"column" => "code", "dir" => "desc"}
-          IO.inspect(item)
-
-          if item["column"] |> String.contains?(".") do
-            if jkeys != [] do
-              [key, col2] = String.split(item["column"], ".") |> IO.inspect()
-              dir = Map.get(item, "dir")
-              col = Map.get(item, "column")
-
-              atoms = ["b", "c", "d"]
-              index = Enum.find_index(jkeys, &(&1 == key))
-
-              "#{dir}: #{atoms |> Enum.at(index)}.#{col2}"
-            else
-              nil
-            end
-          else
-            # "|> sort_by([a,b,c,d], asc: a.#{})"
-
-            dir = Map.get(item, "dir")
-            col = Map.get(item, "column")
-            "#{dir}: a.#{col}"
-          end
-        end
-        |> Enum.reject(&(&1 == nil))
-      else
-        []
-      end
+    end
 
     post_additional_order_statements =
-      if additional_order_statements != [] do
-        """
-        |> order_by([a,b,c,d], #{additional_order_statements |> Enum.join(",")})
-        """
+      if order_items != [] do
+        order_clauses =
+          for item <- order_items do
+            col = Map.get(item, "column", "") |> to_string()
+            dir = Map.get(item, "dir", "asc")
+
+            if col |> String.contains?(".") do
+              [key, col2] = String.split(col, ".", parts: 2)
+              binding = resolve_prefix.(key)
+              "#{dir}: #{binding}.#{col2}"
+            else
+              "#{dir}: a.#{col}"
+            end
+          end
+          |> Enum.reject(&(&1 == nil or &1 == ""))
+
+        if order_clauses != [] do
+          """
+          |> order_by([a,b,c,d], #{order_clauses |> Enum.join(",")})
+          """
+        else
+          ""
+        end
       else
         ""
       end
@@ -3790,8 +3862,27 @@ defmodule BlogEngineWeb.ApiController do
     Logger.info("additional_order_statements -")
     IO.inspect(post_additional_order_statements)
 
+    search_value = params["search"]["value"]
+
+    get_search_val = fn full_col, col_name, fallback_val ->
+      if fallback_val != "" and fallback_val != nil do
+        fallback_val
+      else
+        cond do
+          is_map(search_value) ->
+            Map.get(search_value, full_col) || Map.get(search_value, col_name) || ""
+
+          is_binary(search_value) ->
+            search_value
+
+          true ->
+            ""
+        end
+      end
+    end
+
     additional_search_queries =
-      if additional_search_queries == nil do
+      if additional_search_queries == nil or additional_search_queries == "" do
         if addon_search != "" do
           """
           |> where([a,b,c,d], #{addon_search})
@@ -3805,44 +3896,67 @@ defmodule BlogEngineWeb.ApiController do
         for {item, index} <- columns |> Enum.with_index() do
           cond do
             item |> String.contains?("!=") ->
-              [i, val] = item |> String.split("!=")
+              [i, val] = item |> String.split("!=", parts: 2)
+
+              {p, col} =
+                if String.contains?(i, ".") do
+                  [p, col] = String.split(i, ".", parts: 2)
+                  {resolve_prefix.(p), col}
+                else
+                  {"a", i}
+                end
 
               """
-              |> where([a,b,c,d], a.#{i} != #{val})
+              |> where([a,b,c,d], #{p}.#{col} != #{val})
               """
 
             item |> String.contains?("_id^") ->
-              item = item |> String.replace("^", "")
-              [_prefix, i] = item |> String.split(".")
-              ss = params["search"]["value"]
+              cleaned = item |> String.replace("^", "")
 
-              if ss != "" do
-                case Integer.parse(ss) do
-                  {ss, _} ->
+              {p, i} =
+                if String.contains?(cleaned, ".") do
+                  [p, col] = String.split(cleaned, ".", parts: 2)
+                  {resolve_prefix.(p), col}
+                else
+                  {"a", cleaned}
+                end
+
+              ss = get_search_val.(cleaned, i, "")
+
+              if ss != "" and ss != nil do
+                case Integer.parse(to_string(ss)) do
+                  {ss_int, _} ->
                     """
-                    |> where([a,b,c,d], a.#{i} == ^"#{ss}")
+                    |> where([a,b,c,d], #{p}.#{i} == ^"#{ss_int}")
                     """
 
                   _ ->
                     """
-                    |> where([a,b,c,d], a.#{i} == ^"#{ss}")
+                    |> where([a,b,c,d], #{p}.#{i} == ^"#{ss}")
                     """
                 end
               end
 
             item |> String.contains?("^") ->
-              item = item |> String.replace("^", "")
-              [prefix, i] = item |> String.split(".")
-              ss = params["search"]["value"]
+              cleaned = item |> String.replace("^", "")
 
-              if ss != "" do
+              {p, i} =
+                if String.contains?(cleaned, ".") do
+                  [p, col] = String.split(cleaned, ".", parts: 2)
+                  {resolve_prefix.(p), col}
+                else
+                  {"a", cleaned}
+                end
+
+              ss = get_search_val.(cleaned, i, "")
+
+              if ss != "" and ss != nil do
                 """
-                |> where([a,b,c,d],  ilike(#{prefix}.#{i}, ^"%#{ss}%") )
+                |> where([a,b,c,d],  ilike(#{p}.#{i}, ^"%#{ss}%") )
                 """
               end
 
             true ->
-              ss = params["search"]["value"]
               items = String.split(item, "|")
               ori_addon_search = addon_search
 
@@ -3854,181 +3968,130 @@ defmodule BlogEngineWeb.ApiController do
                 end
 
               subquery =
-                for i <- items do
-                  if i |> String.contains?(".") do
-                    [prefix, i] = i |> String.split(".")
-                    # if possible, here need to add back the previous and statements
-                    [i, value] =
-                      if i |> String.contains?("=") do
-                        [i, value] = String.split(i, "=")
-                      else
-                        [i, ""]
-                      end
+                for raw_i <- items do
+                  {prefix, i, value} =
+                    if raw_i |> String.contains?(".") do
+                      [p, rest] = String.split(raw_i, ".", parts: 2)
 
-                    ss =
-                      if value != "" do
-                        value
-                      else
-                        ss
-                      end
-
-                    check_id = fn tuple ->
-                      if tuple |> is_tuple do
-                        {prefix, i, ss} = tuple
-
-                        if i |> String.contains?("_id") do
-                          case Integer.parse(ss) do
-                            {ss, _val} ->
-                              """
-                              #{prefix}.#{i} == ^#{ss} #{addon_search}
-                              """
-
-                            _ ->
-                              """
-                              ilike(a.#{i}, ^"%#{ss}%")  #{addon_search}
-                              """
-                          end
+                      [col, val] =
+                        if rest |> String.contains?("=") do
+                          String.split(rest, "=", parts: 2)
                         else
-                          with true <-
-                                 i |> String.contains?("id") || i in ["year", "month", "day"],
-                               false <- i |> String.contains?("uuid"),
-                               false <- i |> String.contains?("paid"),
-                               false <- i |> String.contains?("is_"),
-                               true <- ss != nil do
-                            case Integer.parse(ss) |> IO.inspect() do
-                              {ss, _val} ->
-                                """
-                                #{prefix}.#{i} == ^#{ss}  #{addon_search}
-                                """
-
-                              _ ->
-                                """
-                                ilike(a.#{i}, ^"%#{ss}%")  #{addon_search}
-                                """
-                            end
-                          else
-                            _ ->
-                              tuple
-                          end
+                          [rest, ""]
                         end
-                      else
-                        tuple
-                      end
+
+                      {resolve_prefix.(p), col, val}
+                    else
+                      [col, val] =
+                        if raw_i |> String.contains?("=") do
+                          String.split(raw_i, "=", parts: 2)
+                        else
+                          [raw_i, ""]
+                        end
+
+                      {"a", col, val}
                     end
 
-                    check_date = fn tuple ->
-                      if tuple |> is_tuple do
-                        {prefix, i, ss} = tuple
+                  ss = get_search_val.(raw_i, i, value)
 
-                        if i == "date" do
-                          """
-                          #{prefix}.#{i} == ^"#{ss}"  #{addon_search}
-                          """
-                        else
-                          tuple
-                        end
-                      else
-                        tuple
-                      end
-                    end
+                  check_id = fn tuple ->
+                    if tuple |> is_tuple do
+                      {prefix, i, ss} = tuple
 
-                    check_bool = fn tuple ->
-                      if tuple |> is_tuple do
-                        {prefix, i, ss} = tuple
-
-                        if ss == "true" || ss == "false" do
-                          """
-                          #{prefix}.#{i} == ^#{ss}  #{addon_search}
-                          """
-                        else
-                          if ss == nil do
+                      if i |> String.contains?("_id") do
+                        case Integer.parse(to_string(ss)) do
+                          {ss_int, _val} ->
                             """
-                            #{ori_addon_search}
+                            #{prefix}.#{i} == ^#{ss_int} #{addon_search}
                             """
-                          else
+
+                          _ ->
                             """
                             ilike(#{prefix}.#{i}, ^"%#{ss}%")  #{addon_search}
                             """
-                          end
                         end
+                      else
+                        with true <-
+                               i |> String.contains?("id") || i in ["year", "month", "day"],
+                             false <- i |> String.contains?("uuid"),
+                             false <- i |> String.contains?("paid"),
+                             false <- i |> String.contains?("is_"),
+                             true <- ss != nil and ss != "" do
+                          case Integer.parse(to_string(ss)) |> IO.inspect() do
+                            {ss_int, _val} ->
+                              """
+                              #{prefix}.#{i} == ^#{ss_int}  #{addon_search}
+                              """
+
+                            _ ->
+                              """
+                              ilike(#{prefix}.#{i}, ^"%#{ss}%")  #{addon_search}
+                              """
+                          end
+                        else
+                          _ ->
+                            tuple
+                        end
+                      end
+                    else
+                      tuple
+                    end
+                  end
+
+                  check_date = fn tuple ->
+                    if tuple |> is_tuple do
+                      {prefix, i, ss} = tuple
+
+                      if i == "date" do
+                        """
+                        #{prefix}.#{i} == ^"#{ss}"  #{addon_search}
+                        """
                       else
                         tuple
                       end
-                    end
-
-                    check_id.({prefix, i, ss})
-                    |> check_date.()
-                    |> check_bool.()
-                  else
-                    [i, value] =
-                      if i |> String.contains?("=") do
-                        [i, value] = String.split(i, "=")
-                      else
-                        [i, ""]
-                      end
-
-                    ss =
-                      if value != "" do
-                        value
-                      else
-                        ss
-                      end
-
-                    unless i |> String.contains?("_id") do
-                      if ss == "true" || ss == "false" do
-                        """
-                        a.#{i} == ^#{ss}  #{addon_search}
-                        """
-                      else
-                        """
-                        ilike(a.#{i}, ^"%#{ss}%")  #{addon_search}
-                        """
-                      end
                     else
-                      case Integer.parse(ss) do
-                        {ss, _val} ->
-                          """
-                          a.#{i} == ^#{ss}  #{addon_search}
-                          """
-
-                        _ ->
-                          if ss == "true" || ss == "false" do
-                            """
-                            a.#{i} == ^#{ss}  #{addon_search}
-                            """
-                          else
-                            """
-                            ilike(a.#{i}, ^"%#{ss}%")  #{addon_search}
-                            """
-                          end
-                      end
+                      tuple
                     end
                   end
+
+                  check_bool = fn tuple ->
+                    if tuple |> is_tuple do
+                      {prefix, i, ss} = tuple
+
+                      if ss == "true" || ss == "false" || ss == true || ss == false do
+                        """
+                        #{prefix}.#{i} == ^#{ss}  #{addon_search}
+                        """
+                      else
+                        if ss == nil or ss == "" do
+                          """
+                          #{ori_addon_search}
+                          """
+                        else
+                          """
+                          ilike(#{prefix}.#{i}, ^"%#{ss}%")  #{addon_search}
+                          """
+                        end
+                      end
+                    else
+                      tuple
+                    end
+                  end
+
+                  check_id.({prefix, i, ss})
+                  |> check_date.()
+                  |> check_bool.()
                 end
-                |> Enum.reject(&(&1 == nil))
-                |> Enum.reject(&(&1 == ""))
+                |> Enum.reject(&(&1 == nil or &1 == ""))
                 |> Enum.join(" and ")
                 |> IO.inspect()
 
-              with true <- subquery != "",
-                   true <- ss != nil do
-                # consider append existing search queries..
-
+              if subquery != "" and subquery != "\n" and not String.contains?(subquery, "and \n") do
                 """
                 |> or_where([a,b,c,d], #{subquery} )
                 """
               else
-                _ ->
-                  with true <- subquery != "",
-                       true <- subquery != "\n",
-                       false <- subquery |> String.contains?("and \n") do
-                    """
-                    |> or_where([a,b,c,d], #{subquery} )
-                    """
-                  else
-                    _ ->
-                      nil
-                  end
+                nil
               end
           end
         end
