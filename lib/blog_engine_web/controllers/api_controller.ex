@@ -222,6 +222,32 @@ defmodule BlogEngineWeb.ApiController do
               %{status: "error", message: "Unauthorized"}
           end
 
+        scope when scope in ["list_exchange_rules", "list_point_exchange_rules"] ->
+          user = resolve_user_from_params(params)
+
+          case user do
+            %BlogEngine.Settings.User{} = u ->
+              org_id =
+                case Map.get(params, "organization_id") do
+                  v when is_integer(v) ->
+                    v
+
+                  v when is_binary(v) ->
+                    case Integer.parse(String.trim(v)) do
+                      {i, _} -> i
+                      _ -> u.organization_id
+                    end
+
+                  _ ->
+                    u.organization_id
+                end
+
+              Settings.list_active_exchange_rules_for_user(u.id, org_id)
+
+            _ ->
+              %{status: "error", message: "Unauthorized"}
+          end
+
         "list_user_vouchers" ->
           user = resolve_user_from_params(params)
 
@@ -1736,6 +1762,32 @@ defmodule BlogEngineWeb.ApiController do
               %{status: "error", message: "Unauthorized"}
           end
 
+        scope when scope in ["list_exchange_rules", "list_point_exchange_rules"] ->
+          user = resolve_user_from_params(params)
+
+          case user do
+            %BlogEngine.Settings.User{} = u ->
+              org_id =
+                case Map.get(params, "organization_id") do
+                  v when is_integer(v) ->
+                    v
+
+                  v when is_binary(v) ->
+                    case Integer.parse(String.trim(v)) do
+                      {i, _} -> i
+                      _ -> u.organization_id
+                    end
+
+                  _ ->
+                    u.organization_id
+                end
+
+              Settings.list_active_exchange_rules_for_user(u.id, org_id)
+
+            _ ->
+              %{status: "error", message: "Unauthorized"}
+          end
+
         "redeem_user_voucher" ->
           user = resolve_user_from_params(params)
 
@@ -1784,7 +1836,17 @@ defmodule BlogEngineWeb.ApiController do
           case user do
             %BlogEngine.Settings.User{} = u ->
               voucher_id_or_code =
-                params["voucher_id"] || params["code"] || params["voucher_code"]
+                case params["rule_id"] do
+                  id when is_integer(id) ->
+                    "rule_#{id}"
+
+                  str when is_binary(str) and str != "" ->
+                    trimmed = String.trim(str)
+                    if String.starts_with?(trimmed, "rule_"), do: trimmed, else: "rule_#{trimmed}"
+
+                  _ ->
+                    params["voucher_id"] || params["code"] || params["voucher_code"]
+                end
 
               org_id =
                 case Map.get(params, "organization_id") do

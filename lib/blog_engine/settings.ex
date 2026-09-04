@@ -4884,6 +4884,64 @@ defmodule BlogEngine.Settings do
     )
   end
 
+  @doc """
+  Lists active organization redemption rules formatted for the member point exchange UI.
+  """
+  def list_active_exchange_rules_for_user(user_id, organization_id)
+      when is_integer(user_id) and is_integer(organization_id) do
+    ut = get_user_topup_by_user_and_organization(user_id, organization_id)
+    points_balance = if ut, do: (ut.points_balance || 0.0) |> to_float_2dp(), else: 0.0
+    credit_balance = if ut, do: (ut.balance || 0.0) |> to_float_2dp(), else: 0.0
+
+    rules =
+      Repo.all(
+        from(r in OrganizationRedemptionRule,
+          where: r.organization_id == ^organization_id and r.is_active == true,
+          order_by: [asc: r.points_required, desc: r.reward_amount]
+        )
+      )
+
+    items =
+      Enum.map(rules, fn r ->
+        pts_req = (r.points_required || 0.0) |> to_float_2dp()
+        can_exchange = points_balance >= pts_req
+
+        progress_percent =
+          if pts_req > 0 do
+            min(100.0, Float.round((points_balance / pts_req) * 100.0, 1))
+          else
+            100.0
+          end
+
+        %{
+          id: r.id,
+          rule_id: r.id,
+          code: "#{r.voucher_prefix || "REW"}-#{r.id}",
+          name: r.name,
+          description: r.description,
+          points_required: pts_req,
+          reward_amount: (r.reward_amount || 0.0) |> to_float_2dp(),
+          voucher_prefix: r.voucher_prefix,
+          voucher_expiry_days: r.voucher_expiry_days,
+          image_url: r.image_url,
+          is_active: r.is_active,
+          can_exchange: can_exchange,
+          points_needed: max(0.0, pts_req - points_balance) |> to_float_2dp(),
+          progress_percent: progress_percent
+        }
+      end)
+
+    %{
+      status: "ok",
+      rules: items,
+      points_balance: points_balance,
+      credit_balance: credit_balance
+    }
+  end
+
+  def list_active_exchange_rules_for_user(_, _),
+    do: %{status: "ok", rules: [], points_balance: 0.0, credit_balance: 0.0}
+
   def get_organization_redemption_rule!(id), do: Repo.get!(OrganizationRedemptionRule, id)
   def get_organization_redemption_rule(id), do: Repo.get(OrganizationRedemptionRule, id)
 
