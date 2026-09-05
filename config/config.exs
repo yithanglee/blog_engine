@@ -15,6 +15,12 @@ config :blog_engine, :fcm,
   default_profile: "main",
   member_profile: System.get_env("FCM_MEMBER_PROFILE") || "hub"
 
+# Google OAuth ID token audiences (Web + Android client IDs, comma-separated)
+config :blog_engine,
+       :google_client_ids,
+       System.get_env("GOOGLE_CLIENT_IDS") ||
+         "271185094773-gj5f1avv0n0qh0ia4v3re95n8ddh1bsp.apps.googleusercontent.com,271185094773-8egdmqv0ku7qrtkfmgn8jubomoarg0k4.apps.googleusercontent.com"
+
 # Configures the endpoint
 config :blog_engine, BlogEngineWeb.Endpoint,
   url: [host: "localhost"],

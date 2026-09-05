@@ -1119,18 +1119,21 @@ defmodule BlogEngine.Settings do
   end
 
   @doc """
-  Looks up a member `User` by Firebase Authentication UID (stored in `firebase_auth_id`).
+  Looks up a member `User` by Google OAuth subject (`google_sub`).
   """
-  def get_user_by_firebase_auth_id(firebase_auth_id) when is_binary(firebase_auth_id) do
+  def get_user_by_google_sub(google_sub) when is_binary(google_sub) do
     Repo.one(
       from(u in User,
-        where: u.firebase_auth_id == ^firebase_auth_id,
+        where: u.google_sub == ^google_sub,
         preload: [:organization]
       )
     )
   end
 
-  def get_user_by_firebase_auth_id(_), do: nil
+  def get_user_by_google_sub(_), do: nil
+
+  @doc false
+  def get_user_by_firebase_auth_id(id), do: get_user_by_google_sub(id)
 
   @doc """
   Case-insensitive email lookup for member `User` (not `Staff`).
@@ -1152,25 +1155,25 @@ defmodule BlogEngine.Settings do
   def get_user_by_email(_), do: nil
 
   @doc """
-  Sign in a member via Firebase Auth (email/password with verified email, or Google, etc.).
+  Sign in a member via verified Google OAuth ID token claims.
 
-  Expects a map with string keys, e.g. `%{"uid" => ..., "email" => ..., "email_verified" => true}`.
-  Links `firebase_auth_id` on first successful match by email.
+  Expects a map with string keys, e.g. `%{"uid" => google_sub, "email" => ..., "email_verified" => true}`.
+  Links `google_sub` on first successful match by email.
 
   Returns `{:ok, %{user: user_map, token: cookie_token}}` or `{:error, reason}`.
   """
-  def sign_in_with_firebase(attrs) when is_map(attrs) do
+  def sign_in_with_google(attrs) when is_map(attrs) do
     attrs = for {k, v} <- attrs, into: %{}, do: {to_string(k), v}
 
-    uid = attrs["uid"]
+    uid = attrs["uid"] || attrs["sub"]
 
     cond do
       not is_binary(uid) or String.trim(uid) == "" ->
-        {:error, :invalid_firebase_uid}
+        {:error, :invalid_google_sub}
 
       true ->
-        email = attrs["email"] |> normalize_firebase_email()
-        email_verified = firebase_email_verified?(attrs, email)
+        email = attrs["email"] |> normalize_oauth_email()
+        email_verified = oauth_email_verified?(attrs, email)
 
         cond do
           is_binary(email) and email != "" and email_verified == false ->
@@ -1182,18 +1185,21 @@ defmodule BlogEngine.Settings do
     end
   end
 
-  defp normalize_firebase_email(nil), do: nil
+  @doc false
+  def sign_in_with_firebase(attrs), do: sign_in_with_google(attrs)
 
-  defp normalize_firebase_email(email) when is_binary(email) do
+  defp normalize_oauth_email(nil), do: nil
+
+  defp normalize_oauth_email(email) when is_binary(email) do
     case String.trim(email) do
       "" -> nil
       e -> e
     end
   end
 
-  defp normalize_firebase_email(_), do: nil
+  defp normalize_oauth_email(_), do: nil
 
-  defp firebase_email_verified?(attrs, email) do
+  defp oauth_email_verified?(attrs, email) do
     v = Map.get(attrs, "email_verified") || Map.get(attrs, "emailVerified")
 
     cond do
@@ -1210,14 +1216,13 @@ defmodule BlogEngine.Settings do
         true
 
       true ->
-        # Flag omitted (common when wrapping Firebase `User`); treat as verified if email present
         true
     end
   end
 
   defp resolve_user_and_issue_token(uid, attrs, email) do
     user =
-      case get_user_by_firebase_auth_id(uid) do
+      case get_user_by_google_sub(uid) do
         %User{} = u ->
           {:ok, u}
 
@@ -1236,22 +1241,22 @@ defmodule BlogEngine.Settings do
 
     case user do
       {:ok, u} ->
-        u = maybe_update_profile_from_firebase(u, attrs)
+        u = maybe_update_profile_from_oauth(u, attrs)
         issue_oauth_member_session(u)
 
       {:needs_link, %User{} = u} ->
-        case User.changeset(u, %{firebase_auth_id: uid}) |> Repo.update() do
+        case User.changeset(u, %{google_sub: uid}) |> Repo.update() do
           {:ok, u} ->
             u = u |> Repo.preload([:organization])
-            u = maybe_update_profile_from_firebase(u, attrs)
+            u = maybe_update_profile_from_oauth(u, attrs)
             issue_oauth_member_session(u)
 
           {:error, changeset} ->
-            {:error, {:could_not_link_firebase, changeset}}
+            {:error, {:could_not_link_google, changeset}}
         end
 
       {:needs_link, nil} ->
-        {:error, :firebase_user_needs_email}
+        {:error, :google_user_needs_email}
 
       {:missing, nil} ->
         username = unique_member_username(email)
@@ -1261,7 +1266,7 @@ defmodule BlogEngine.Settings do
             "username" => username,
             "email" => email,
             "fullname" => attrs["name"] || attrs["displayName"] || username,
-            "firebase_auth_id" => uid
+            "google_sub" => uid
           }
           |> then(fn a ->
             org_id = attrs["organization_id"] || attrs["org_id"]
@@ -1286,12 +1291,12 @@ defmodule BlogEngine.Settings do
             issue_oauth_member_session(u)
 
           {:error, changeset} ->
-            {:error, {:could_not_link_firebase, changeset}}
+            {:error, {:could_not_link_google, changeset}}
         end
     end
   end
 
-  defp maybe_update_profile_from_firebase(%User{} = u, attrs) do
+  defp maybe_update_profile_from_oauth(%User{} = u, attrs) do
     name = attrs["name"] || attrs["displayName"]
     updates = %{}
 
@@ -1302,7 +1307,7 @@ defmodule BlogEngine.Settings do
         updates
       end
 
-    em = normalize_firebase_email(attrs["email"] || Map.get(attrs, "email"))
+    em = normalize_oauth_email(attrs["email"] || Map.get(attrs, "email"))
 
     updates =
       if is_binary(em) and em != "" and (is_nil(u.email) or u.email == "") do
@@ -1322,7 +1327,7 @@ defmodule BlogEngine.Settings do
   end
 
   defp issue_oauth_member_session(%User{} = user) do
-    user = Repo.preload(user, [:merchant, :rank, :stockist_users])
+    user = Repo.preload(user, [])
     token = member_token(user.id)
     create_session_user(%{"cookie" => token, "user_id" => user.id})
 
@@ -5477,5 +5482,3 @@ defmodule BlogEngine.Settings do
 
   defp normalize_voucher_attrs(attrs), do: attrs
 end
-
-

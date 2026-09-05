@@ -3062,54 +3062,10 @@ defmodule BlogEngineWeb.ApiController do
           member_password_login_response(params)
 
         "firebase_signin" ->
-          params
-          |> normalize_firebase_signin_payload()
-          |> Settings.sign_in_with_firebase()
-          |> IO.inspect(label: "DEBUG_FIREBASE_SIGNIN")
-          |> case do
-            {:ok, %{user: u}} ->
-              %{status: "ok", res: u}
-
-            {:error, reason} ->
-              %{status: "error", reason: firebase_signin_error_message(reason)}
-          end
+          google_oauth_signin_response(params)
 
         "google_signin" ->
-          params
-          |> normalize_firebase_signin_payload()
-          |> then(fn p ->
-            org = params["organization_id"] || params["org_id"] || get_in(params, ["result", "organization_id"])
-            if org, do: Map.put(p, "organization_id", org), else: p
-          end)
-          |> Settings.sign_in_with_firebase()
-          |> case do
-            {:ok, %{user: u} = res_map} ->
-              user_id = Map.get(res_map, :id) || Map.get(u, :id) || Map.get(u, "id")
-              token =
-                case Map.get(res_map, :token) || Map.get(u, :token) || Map.get(u, "token") do
-                  t when is_binary(t) and t != "" -> t
-                  _ ->
-                    if user_id do
-                      t = Settings.member_token(user_id)
-                      Settings.create_session_user(%{"cookie" => t, "user_id" => user_id})
-                      t
-                    else
-                      ""
-                    end
-                end
-
-              %{
-                status: "ok",
-                res: token,
-                user: u |> BluePotion.sanitize_struct(),
-                id: user_id,
-                user_id: user_id,
-                role_app_routes: []
-              }
-
-            {:error, reason} ->
-              %{status: "error", reason: firebase_signin_error_message(reason)}
-          end
+          google_oauth_signin_response(params)
 
         "operator_subscribe_plan" ->
           case Map.get(conn.assigns, :api_auth) do
@@ -5063,6 +5019,62 @@ defmodule BlogEngineWeb.ApiController do
     end
   end
 
+  defp google_oauth_signin_response(params) when is_map(params) do
+    id_token =
+      params["id_token"] || params["idToken"] ||
+        get_in(params, ["result", "id_token"]) || get_in(params, ["result", "idToken"]) ||
+        get_in(params, ["firebase", "id_token"]) || get_in(params, ["firebase", "idToken"])
+
+    case BlogEngine.GoogleIdToken.verify(id_token) do
+      {:ok, claims} ->
+        org =
+          params["organization_id"] || params["org_id"] ||
+            get_in(params, ["result", "organization_id"])
+
+        attrs =
+          if org do
+            Map.put(claims, "organization_id", org)
+          else
+            claims
+          end
+
+        case Settings.sign_in_with_google(attrs) do
+          {:ok, %{user: u} = res_map} ->
+            user_id = Map.get(res_map, :id) || Map.get(u, :id) || Map.get(u, "id")
+
+            token =
+              case Map.get(res_map, :token) || Map.get(u, :token) || Map.get(u, "token") do
+                t when is_binary(t) and t != "" ->
+                  t
+
+                _ ->
+                  if user_id do
+                    t = Settings.member_token(user_id)
+                    Settings.create_session_user(%{"cookie" => t, "user_id" => user_id})
+                    t
+                  else
+                    ""
+                  end
+              end
+
+            %{
+              status: "ok",
+              res: token,
+              user: u |> BluePotion.sanitize_struct(),
+              id: user_id,
+              user_id: user_id,
+              role_app_routes: []
+            }
+
+          {:error, reason} ->
+            %{status: "error", reason: google_signin_error_message(reason)}
+        end
+
+      {:error, reason} ->
+        %{status: "error", reason: google_signin_error_message(reason)}
+    end
+  end
+
   defp normalize_firebase_signin_payload(params) when is_map(params) do
     nested =
       cond do
@@ -5090,21 +5102,41 @@ defmodule BlogEngineWeb.ApiController do
     }
   end
 
-  defp firebase_signin_error_message(:invalid_firebase_uid), do: "Invalid Firebase UID"
+  defp google_signin_error_message(:missing_id_token), do: "Google ID token is required"
+  defp google_signin_error_message(:invalid_token), do: "Invalid Google ID token"
+  defp google_signin_error_message(:malformed_token), do: "Malformed Google ID token"
+  defp google_signin_error_message(:invalid_signature), do: "Invalid Google ID token signature"
+  defp google_signin_error_message(:invalid_issuer), do: "Invalid Google token issuer"
+  defp google_signin_error_message(:invalid_audience), do: "Invalid Google token audience"
+  defp google_signin_error_message(:token_expired), do: "Google ID token expired"
+  defp google_signin_error_message(:email_missing), do: "Google account email is required"
+  defp google_signin_error_message(:google_client_ids_not_configured),
+    do: "Google OAuth is not configured on the server"
 
-  defp firebase_signin_error_message(:email_not_verified),
-    do: "Email must be verified in Firebase"
+  defp google_signin_error_message(:invalid_google_sub), do: "Invalid Google subject"
+  defp google_signin_error_message(:invalid_firebase_uid), do: "Invalid Google subject"
 
-  defp firebase_signin_error_message(:firebase_user_needs_email),
-    do: "Link a verified email to your Firebase account to match your profile"
+  defp google_signin_error_message(:email_not_verified),
+    do: "Email must be verified with Google"
 
-  defp firebase_signin_error_message(:no_account_for_firebase),
+  defp google_signin_error_message(:google_user_needs_email),
+    do: "Link a verified email to your Google account to match your profile"
+
+  defp google_signin_error_message(:firebase_user_needs_email),
+    do: "Link a verified email to your Google account to match your profile"
+
+  defp google_signin_error_message(:no_account_for_firebase),
     do: "No profile found for this email. Ask an administrator to create your account first."
 
-  defp firebase_signin_error_message({:could_not_link_firebase, _}),
-    do: "Could not link Firebase ID to your profile"
+  defp google_signin_error_message({:could_not_link_google, _}),
+    do: "Could not link Google ID to your profile"
 
-  defp firebase_signin_error_message(_), do: "Firebase sign-in failed"
+  defp google_signin_error_message({:could_not_link_firebase, _}),
+    do: "Could not link Google ID to your profile"
+
+  defp google_signin_error_message(_), do: "Google sign-in failed"
+
+  defp firebase_signin_error_message(reason), do: google_signin_error_message(reason)
 
   @doc """
   Export sales list as a streamed CSV file filtered by organization_id and date range (start_date, end_date).

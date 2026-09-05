@@ -746,10 +746,13 @@ defmodule BlogEngine do
   end
 
   @doc """
-  Sign in a **member** (`BlogEngine.Settings.User`) using Firebase Authentication.
+  Sign in a **member** (`BlogEngine.Settings.User`) using verified Google OAuth claims.
 
-  Links `firebase_auth_id` on first match by verified email. See `BlogEngine.Settings.sign_in_with_firebase/1`.
+  Links `google_sub` on first match by verified email. See `BlogEngine.Settings.sign_in_with_google/1`.
   """
+  defdelegate sign_in_with_google(params), to: BlogEngine.Settings
+
+  @doc false
   defdelegate sign_in_with_firebase(params), to: BlogEngine.Settings
 
   def translation() do

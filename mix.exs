@@ -51,6 +51,7 @@ defmodule BlogEngine.MixProject do
       {:ecto, ">= 3.4.4 and < 3.4.5"},
       {:ecto_enum, "~> 1.4"},
       {:goth, "~> 1.3"},
+      {:jose, "~> 1.11"},
       {:pdf_generator, ">=0.3.5"},
       {:postgrex, ">= 0.0.0"},
       {:phoenix_html, "~> 2.11"},
