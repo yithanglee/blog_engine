@@ -3182,6 +3182,23 @@ defmodule BlogEngineWeb.ApiController do
               %{status: "error", reason: "Staff sign-in required."}
           end
 
+        "check_billplz" ->
+          case Settings.check_invoice_billplz(params["id"]) do
+            {:ok, result} ->
+              %{
+                status: "ok",
+                paid: result.paid,
+                state: result.state,
+                invoice_status: result.invoice_status
+              }
+
+            {:error, reason} when is_binary(reason) ->
+              %{status: "error", reason: reason}
+
+            {:error, reason} ->
+              %{status: "error", reason: inspect(reason)}
+          end
+
         "get_organization_tnc" ->
           organization_id =
             if params["organization_id"] == nil do

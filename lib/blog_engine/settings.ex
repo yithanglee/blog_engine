@@ -3587,6 +3587,121 @@ defmodule BlogEngine.Settings do
     Invoice.changeset(model, params) |> Repo.update() |> IO.inspect()
   end
 
+  @doc """
+  Fetch the Billplz bill for an invoice and, if paid, mark the invoice paid
+  and activate linked outlet subscriptions.
+  """
+  def check_invoice_billplz(id) do
+    invoice_id = parse_invoice_id(id)
+
+    cond do
+      is_nil(invoice_id) ->
+        {:error, "Invoice id required"}
+
+      true ->
+        case Repo.get(Invoice, invoice_id) do
+          nil ->
+            {:error, "Invoice not found"}
+
+          invoice ->
+            invoice = Repo.preload(invoice, [:organization, :outlet_subscriptions, :outlets])
+            sync_invoice_billplz(invoice)
+        end
+    end
+  end
+
+  defp sync_invoice_billplz(invoice) do
+    bill_id = billplz_bill_id(invoice)
+
+    cond do
+      bill_id in [nil, ""] ->
+        {:error, "No Billplz bill found for this invoice. Click Pay first."}
+
+      true ->
+        case Billplz.get_bill(bill_id) do
+          {:ok, bill} when is_map(bill) ->
+            apply_billplz_bill(invoice, bill)
+
+          {:error, %{body: body}} ->
+            {:error, billplz_error_message(body)}
+
+          {:error, reason} ->
+            {:error, inspect(reason)}
+
+          other ->
+            {:error, inspect(other)}
+        end
+    end
+  end
+
+  defp apply_billplz_bill(invoice, bill) do
+    paid? = billplz_paid?(bill)
+
+    attrs = %{webhook_details: Jason.encode!(bill)}
+    attrs = if paid?, do: Map.put(attrs, :status, "paid"), else: attrs
+
+    case update_invoice(invoice, attrs) do
+      {:ok, updated} ->
+        if paid? do
+          (updated.outlet_subscriptions || [])
+          |> Enum.each(&update_outlet_subscription(&1, %{status: "active"}))
+        end
+
+        {:ok,
+         %{
+           paid: paid?,
+           state: bill["state"],
+           invoice_status: if(paid?, do: "paid", else: updated.status)
+         }}
+
+      {:error, changeset} ->
+        {:error, inspect(changeset.errors)}
+    end
+  end
+
+  defp billplz_bill_id(%Invoice{payment_url: url}) when is_binary(url) and url != "" do
+    case Regex.run(~r{/bills/([^/?#]+)}, url) do
+      [_, bill_id] ->
+        bill_id
+
+      _ ->
+        trimmed = String.trim(url)
+
+        if String.match?(trimmed, ~r/^[A-Za-z0-9_-]+$/) do
+          trimmed
+        else
+          nil
+        end
+    end
+  end
+
+  defp billplz_bill_id(_), do: nil
+
+  defp billplz_paid?(bill) when is_map(bill) do
+    case bill["paid"] do
+      true -> true
+      "true" -> true
+      "True" -> true
+      _ -> bill["state"] in ["paid", "Paid"]
+    end
+  end
+
+  defp billplz_error_message(%{"error" => %{"message" => message}}) when is_binary(message),
+    do: message
+
+  defp billplz_error_message(body), do: inspect(body)
+
+  defp parse_invoice_id(id) when is_integer(id), do: id
+
+  defp parse_invoice_id(id) when is_binary(id) do
+    case Integer.parse(String.trim(id)) do
+      {i, _} -> i
+      _ -> nil
+    end
+  end
+
+  defp parse_invoice_id(_), do: nil
+
   def delete_invoice(%Invoice{} = model) do
     Repo.delete(model)
   end
