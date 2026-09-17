@@ -3636,11 +3636,12 @@ defmodule BlogEngine.Settings do
 
   defp apply_billplz_bill(invoice, bill) do
     paid? = billplz_paid?(bill)
+    webhook_json = Jason.encode!(bill)
 
-    attrs = %{webhook_details: Jason.encode!(bill)}
-    attrs = if paid?, do: Map.put(attrs, :status, "paid"), else: attrs
+    status_attrs = if paid?, do: %{status: "paid"}, else: %{}
+    attrs = Map.put(status_attrs, :webhook_details, webhook_json)
 
-    case update_invoice(invoice, attrs) do
+    case persist_billplz_invoice(invoice, attrs, status_attrs) do
       {:ok, updated} ->
         if paid? do
           (updated.outlet_subscriptions || [])
@@ -3656,6 +3657,24 @@ defmodule BlogEngine.Settings do
 
       {:error, changeset} ->
         {:error, inspect(changeset.errors)}
+    end
+  end
+
+  # webhook_details was varchar(255); persist paid status even if the JSON is too long.
+  defp persist_billplz_invoice(invoice, attrs, status_attrs) do
+    try do
+      update_invoice(invoice, attrs)
+    rescue
+      e in Postgrex.Error ->
+        if e.postgres[:code] == :string_data_right_truncation and status_attrs != %{} do
+          Logger.warn(
+            "Billplz webhook_details too long for invoice #{invoice.id}; saving status only"
+          )
+
+          update_invoice(invoice, status_attrs)
+        else
+          reraise e, __STACKTRACE__
+        end
     end
   end
 
