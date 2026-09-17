@@ -1,7 +1,7 @@
 defmodule Razer do
   require Logger
 
-  @endpoint Application.get_env(:blog_engine, :razer)[:endpoint]
+  @default_fiuu_endpoint "https://pay.merchant.razer.com"
 
   @redirect_url Application.get_env(:blog_engine, :url)
   # merchant_id Application.get_env(:blog_engine, :razer)[:mid]
@@ -67,41 +67,44 @@ defmodule Razer do
     amt =
       case Application.get_env(:blog_engine, :release) do
         :prod ->
-          amt
+          format_amount(amt)
 
         :dev ->
-          amt
+          format_amount(amt)
 
         _ ->
           "2.0"
       end
 
-    generate_signature = fn ->
-      merchant_id = merchant_id
-      verify_key = vkey
+    bill_name = user.username || user.fullname || "Customer"
+    bill_email = user.email || ""
+    bill_mobile = user.phone || ""
+    bill_desc = reference_no
 
-      IO.inspect(
+    vcode =
+      :crypto.hash(:md5, amt <> merchant_id <> reference_no <> vkey)
+      |> Base.encode16(case: :lower)
+
+    query =
+      URI.encode_query(
         %{
-          amt: amt,
-          merchant_id: merchant_id,
-          reference_no: reference_no,
-          vkey: vkey
+          "merchant_id" => merchant_id,
+          "amount" => amt,
+          "orderid" => reference_no,
+          "bill_name" => bill_name,
+          "bill_email" => bill_email,
+          "bill_mobile" => bill_mobile,
+          "bill_desc" => bill_desc,
+          "vcode" => vcode
         },
-        label: "generate_signature"
+        :rfc3986
       )
 
-      str = amt <> merchant_id <> reference_no <> vkey
-      IO.puts(str)
-      md5 = :crypto.hash(:md5, str) |> Base.encode16(case: :lower)
-      IO.puts(md5)
-      md5
-    end
-
-    "#{@endpoint}/RMS/pay/#{merchant_id}/#{channel}.php?merchant_id=#{merchant_id}&amount=#{amt}&orderid=#{reference_no}&bill_name=#{user.username}&bill_email=#{user.email}&bill_mobile=#{user.phone}&bill_desc=#{reference_no}&vcode=#{generate_signature.()}"
+    "#{fiuu_endpoint()}/RMS/pay/#{merchant_id}/#{channel}.php?#{query}"
   end
 
   def enquire_transaction(trx_id, amount, merchant_id, vkey) do
-    url = "#{@endpoint}/RMS/API/gate-query/index.php"
+    url = "#{fiuu_endpoint()}/RMS/API/gate-query/index.php"
 
     generate_signature = fn ->
       merchant_id = merchant_id
@@ -868,7 +871,7 @@ defmodule Razer do
   end
 
   def get_channels(merchant_id, vkey) do
-    url = "#{@endpoint}/RMS/API/chkstat/channel_status.php"
+    url = "#{fiuu_endpoint()}/RMS/API/chkstat/channel_status.php"
 
     generate_signature = fn datetime ->
       merchant_id = merchant_id
@@ -991,7 +994,7 @@ defmodule Razer do
 
     # Make the POST request
     case HTTPoison.post(
-           "#{@endpoint}/RMS/API/Direct/1.4.0/index.php",
+           "#{fiuu_endpoint()}/RMS/API/Direct/1.4.0/index.php",
            {:multipart, form_data},
            headers
          )
@@ -1018,4 +1021,27 @@ defmodule Razer do
         %{status: :error, reason: reason}
     end
   end
+
+  defp fiuu_endpoint do
+    Application.get_env(:blog_engine, :razer)
+    |> case do
+      %{endpoint: endpoint} when is_binary(endpoint) and endpoint != "" -> String.trim_trailing(endpoint, "/")
+      _ -> @default_fiuu_endpoint
+    end
+  end
+
+  defp format_amount(amt) when is_binary(amt) do
+    case Float.parse(String.trim(amt)) do
+      {f, _} -> format_amount(f)
+      _ -> amt
+    end
+  end
+
+  defp format_amount(amt) when is_integer(amt), do: format_amount(amt * 1.0)
+
+  defp format_amount(amt) when is_float(amt) do
+    :erlang.float_to_binary(amt, decimals: 2)
+  end
+
+  defp format_amount(_), do: "0.00"
 end

@@ -250,7 +250,7 @@ defmodule BlogEngineWeb.PageController do
     json(conn, %{status: "ok"})
   end
 
-  def subscription_payment(conn, %{"chan" => chan, "amt" => _amt, "ref_no" => ref} = params) do
+  def subscription_payment(conn, %{"chan" => chan, "amt" => param_amt, "ref_no" => ref} = params) do
     id =
       case params |> Map.get("ref_no") |> String.replace("SUBS", "") |> Integer.parse() do
         {id, _} -> id
@@ -259,7 +259,14 @@ defmodule BlogEngineWeb.PageController do
 
     invoice = BlogEngine.Settings.get_invoice!(id)
 
-    grand_total = invoice.outlet_subscriptions |> Enum.map(& &1.amount) |> Enum.sum()
+    subs_total = invoice.outlet_subscriptions |> Enum.map(& &1.amount) |> Enum.sum()
+
+    grand_total =
+      cond do
+        subs_total > 0 -> subs_total
+        invoice.grand_total not in [nil, 0] -> invoice.grand_total
+        true -> parse_payment_amount(param_amt)
+      end
 
     {:ok, invoice} =
       BlogEngine.Settings.update_invoice(invoice, %{
@@ -276,8 +283,8 @@ defmodule BlogEngineWeb.PageController do
           chan,
           "#{amt}",
           ref,
-          "djtechplt_Dev",
-          "e37344c535a8d12000294306994251a3",
+          "DJadmin",
+          "18feab209cf58a14caea932408a82632",
           %{
             fullname: invoice.organization.name,
             phone: invoice.organization.phone,
@@ -287,6 +294,16 @@ defmodule BlogEngineWeb.PageController do
         )
     )
   end
+
+  defp parse_payment_amount(amt) when is_binary(amt) do
+    case Float.parse(String.trim(amt)) do
+      {f, _} -> f
+      _ -> 0.0
+    end
+  end
+
+  defp parse_payment_amount(amt) when is_number(amt), do: amt * 1.0
+  defp parse_payment_amount(_), do: 0.0
 
   @doc """
   BlogEngineWeb.PageController.notification(Phoenix.ConnTest.build_conn(), test_params)
