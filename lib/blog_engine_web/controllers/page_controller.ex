@@ -178,7 +178,7 @@ defmodule BlogEngineWeb.PageController do
         callback_url:
           Application.get_env(:blog_engine, :billplz)[:callback] <> "/api/billplz_callback",
         description: "Subscription Payment"
-      )
+      ) |> IO.inspect(label: "billplz_res")
 
     {:ok, invoice} =
       BlogEngine.Settings.update_invoice(invoice, %{

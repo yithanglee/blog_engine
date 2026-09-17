@@ -47,7 +47,7 @@ defmodule Billplz do
       {"Content-Type", "application/json"}
     ]
 
-    case HTTPoison.post(url, Jason.encode!(body), headers) do
+    case HTTPoison.post(url, Jason.encode!(body), headers)|> IO.inspect(label: "billplz_res") do
       {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
         Jason.decode(body)
 
