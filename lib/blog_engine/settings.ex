@@ -3951,7 +3951,9 @@ defmodule BlogEngine.Settings do
       {:ok, multi_res} ->
         trx = Map.get(multi_res, :user_topup_transaction)
 
-        if trx.amount > 0 do
+        skip_operator_notification = Map.get(params, :skip_operator_notification, false)
+
+        if trx.amount > 0 and not skip_operator_notification do
           trx = Repo.preload(trx, [:organization, :user_topup])
 
           org_id =
@@ -4000,7 +4002,9 @@ defmodule BlogEngine.Settings do
       remarks: params[:remarks] || params["remarks"],
       sales_id: params[:sales_id] || params["sales_id"],
       device_log_id: params[:device_log_id] || params["device_log_id"],
-      skip_points: Map.get(params, :skip_points, Map.get(params, "skip_points", false))
+      skip_points: Map.get(params, :skip_points, Map.get(params, "skip_points", false)),
+      skip_operator_notification:
+        Map.get(params, :skip_operator_notification, Map.get(params, "skip_operator_notification", false))
     }
   end
 
@@ -4025,6 +4029,221 @@ defmodule BlogEngine.Settings do
   def delete_user_topup_transaction(%UserTopupTransaction{} = model) do
     Repo.delete(model)
   end
+
+  def list_user_point_transactions do
+    Repo.all(UserPointTransaction)
+  end
+
+  def get_user_point_transaction!(id) do
+    Repo.get!(UserPointTransaction, id)
+  end
+
+  def get_user_point_transaction(id) do
+    Repo.get(UserPointTransaction, id)
+  end
+
+  def create_user_point_transaction(params \\ %{}) do
+    params = normalize_user_point_transaction_params(params)
+    user_id = Map.get(params, :user_id)
+    organization_id = Map.get(params, :organization_id)
+    points = Map.get(params, :points, 0.0) |> to_float_2dp()
+    transaction_type = Map.get(params, :transaction_type)
+    remarks = Map.get(params, :remarks)
+
+    cond do
+      is_nil(user_id) ->
+        {:error, "user_id is required"}
+
+      is_nil(organization_id) ->
+        {:error, "organization_id is required"}
+
+      points == 0.0 ->
+        {:error, "Points amount must not be zero"}
+
+      true ->
+        Multi.new()
+        |> Multi.run(:user_topup, fn _repo, _changes ->
+          case Repo.get_by(UserTopup, user_id: user_id, organization_id: organization_id) do
+            %UserTopup{} = ut ->
+              {:ok, ut}
+
+            nil ->
+              case create_user_topup(%{
+                     user_id: user_id,
+                     organization_id: organization_id,
+                     balance: 0.0,
+                     points_balance: 0.0
+                   }) do
+                {:ok, %UserTopup{} = ut} -> {:ok, ut}
+                {:error, cg} -> {:error, cg}
+              end
+          end
+        end)
+        |> Multi.run(:validate_points, fn _repo, %{user_topup: ut} ->
+          before_pts = (ut.points_balance || 0.0) |> to_float_2dp()
+          after_pts = (before_pts + points) |> to_float_2dp()
+
+          if after_pts < 0.0 do
+            {:error,
+             "Insufficient points balance. Current balance is #{before_pts} pts, cannot deduct #{abs(points)} pts."}
+          else
+            {:ok, %{before_points: before_pts, after_points: after_pts}}
+          end
+        end)
+        |> Multi.run(:user_topup_update, fn _repo, %{user_topup: ut, validate_points: pts_info} ->
+          UserTopup.changeset(ut, %{points_balance: pts_info.after_points})
+          |> Repo.update()
+        end)
+        |> Multi.run(:user_point_transaction, fn _repo, %{validate_points: pts_info} ->
+          type =
+            cond do
+              is_binary(transaction_type) and transaction_type != "" ->
+                transaction_type
+
+              points > 0.0 ->
+                "manual_addition"
+
+              true ->
+                "manual_deduction"
+            end
+
+          default_remarks =
+            if points > 0.0 do
+              "Manual points addition by admin"
+            else
+              "Manual points deduction by admin"
+            end
+
+          UserPointTransaction.changeset(%UserPointTransaction{}, %{
+            user_id: user_id,
+            organization_id: organization_id,
+            points: points,
+            before_points: pts_info.before_points,
+            after_points: pts_info.after_points,
+            transaction_type: type,
+            remarks:
+              if(remarks && String.trim(to_string(remarks)) != "",
+                do: to_string(remarks),
+                else: default_remarks
+              ),
+            voucher_id: Map.get(params, :voucher_id),
+            user_topup_transaction_id: Map.get(params, :user_topup_transaction_id)
+          })
+          |> Repo.insert()
+        end)
+        |> Repo.transaction()
+        |> case do
+          {:ok, %{user_point_transaction: upt}} ->
+            {:ok, upt}
+
+          {:error, :validate_points, reason, _} ->
+            {:error, reason}
+
+          {:error, _step, failed_val, _} ->
+            {:error, failed_val}
+        end
+    end
+  end
+
+  def update_user_point_transaction(%UserPointTransaction{} = model, params) do
+    UserPointTransaction.changeset(model, params) |> Repo.update()
+  end
+
+  def delete_user_point_transaction(%UserPointTransaction{} = model) do
+    Repo.delete(model)
+  end
+
+  defp normalize_user_point_transaction_params(params) when is_map(params) do
+    params =
+      cond do
+        Map.has_key?(params, :user_id) or Map.has_key?(params, :points) ->
+          params
+
+        true ->
+          for {k, v} <- params, into: %{}, do: {to_string(k), v}
+      end
+
+    user_id =
+      case params[:user_id] || params["user_id"] do
+        nil ->
+          nil
+
+        id when is_integer(id) ->
+          id
+
+        id when is_binary(id) ->
+          case Integer.parse(String.trim(id)) do
+            {i, _} -> i
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+
+    organization_id =
+      case params[:organization_id] || params["organization_id"] do
+        nil ->
+          nil
+
+        id when is_integer(id) ->
+          id
+
+        id when is_binary(id) ->
+          case Integer.parse(String.trim(id)) do
+            {i, _} -> i
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+
+    points_raw =
+      case params[:points] || params["points"] do
+        nil ->
+          0.0
+
+        v when is_number(v) ->
+          v * 1.0
+
+        v when is_binary(v) ->
+          case Float.parse(String.trim(v)) do
+            {f, _} -> f
+            _ -> 0.0
+          end
+
+        _ ->
+          0.0
+      end
+
+    action = params[:action] || params["action"]
+
+    points =
+      cond do
+        action in ["deduct", "deduction", "manual_deduction"] and points_raw > 0 ->
+          -points_raw
+
+        action in ["add", "addition", "manual_addition"] and points_raw < 0 ->
+          abs(points_raw)
+
+        true ->
+          points_raw
+      end
+
+    %{
+      user_id: user_id,
+      organization_id: organization_id,
+      points: points,
+      transaction_type: params[:transaction_type] || params["transaction_type"],
+      remarks: params[:remarks] || params["remarks"],
+      voucher_id: params[:voucher_id] || params["voucher_id"],
+      user_topup_transaction_id:
+        params[:user_topup_transaction_id] || params["user_topup_transaction_id"]
+    }
+  end
+
+  defp normalize_user_point_transaction_params(_), do: %{}
 
   alias BlogEngine.Settings.IoReading
 
@@ -4527,7 +4746,8 @@ defmodule BlogEngine.Settings do
           user_id: u.id,
           organization_id: org_id,
           amount: voucher.amount,
-          remarks: "Voucher Redeem (#{voucher.code})"
+          remarks: "Voucher Redeem (#{voucher.code})",
+          skip_operator_notification: true
         })
       end)
       |> Repo.transaction()
@@ -4918,7 +5138,8 @@ defmodule BlogEngine.Settings do
           user_id: u.id,
           organization_id: org_id,
           amount: voucher.amount,
-          remarks: "Voucher Redeem (#{voucher.code})"
+          remarks: "Voucher Redeem (#{voucher.code})",
+          skip_operator_notification: true
         })
       end)
       |> Repo.transaction()
@@ -5438,7 +5659,8 @@ defmodule BlogEngine.Settings do
             organization_id: org_id,
             amount: rule.reward_amount,
             remarks: "Reward Rule Redemption (#{rule.name})",
-            skip_points: true
+            skip_points: true,
+            skip_operator_notification: true
           })
         end)
         |> Repo.transaction()
@@ -5530,7 +5752,8 @@ defmodule BlogEngine.Settings do
           organization_id: org_id,
           amount: voucher.amount,
           remarks: "Voucher Point Redemption (#{voucher.code})",
-          skip_points: true
+          skip_points: true,
+          skip_operator_notification: true
         })
       end)
       |> Repo.transaction()

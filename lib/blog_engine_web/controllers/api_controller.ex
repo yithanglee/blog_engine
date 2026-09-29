@@ -2013,6 +2013,35 @@ defmodule BlogEngineWeb.ApiController do
               end
           end
 
+        "manual_adjust_user_points" ->
+          case Settings.create_user_point_transaction(params) do
+            {:ok, trx} ->
+              user_id = trx.user_id
+              org_id = trx.organization_id
+              ut = Settings.get_user_topup_by_user_and_organization(user_id, org_id)
+              balance = if ut, do: ut.points_balance || 0.0, else: 0.0
+
+              %{
+                status: "ok",
+                message: "Point transaction created successfully",
+                transaction: BluePotion.sanitize_struct(trx),
+                points_balance: balance
+              }
+
+            {:error, %Ecto.Changeset{} = cg} ->
+              errors =
+                Ecto.Changeset.traverse_errors(cg, fn {msg, opts} ->
+                  Enum.reduce(opts, msg, fn {k, v}, acc ->
+                    String.replace(acc, "%{#{k}}", to_string(v))
+                  end)
+                end)
+
+              %{status: "error", message: inspect(errors)}
+
+            {:error, reason} ->
+              %{status: "error", message: to_string(reason)}
+          end
+
         "delete_user_data" ->
           session = params["user_token"] |> BlogEngine.Settings.get_cookie_user_by_cookie()
 
@@ -3143,7 +3172,8 @@ defmodule BlogEngineWeb.ApiController do
                                        user_id: user_id,
                                        organization_id: staff_org_id,
                                        amount: amount,
-                                       remarks: refund_remarks
+                                       remarks: refund_remarks,
+                                       skip_operator_notification: true
                                      }) do
                                   {:ok, trx} ->
                                     Task.start(fn ->
