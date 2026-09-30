@@ -64,7 +64,40 @@ defmodule BlogEngine.Settings do
   end
 
   def create_organization(params \\ %{}) do
-    Organization.changeset(%Organization{}, params) |> Repo.insert() |> IO.inspect()
+    case Organization.changeset(%Organization{}, params) |> Repo.insert() do
+      {:ok, org} = res ->
+        seed_default_onboard_voucher(org.id)
+        res
+
+      error ->
+        error
+    end
+  end
+
+  def seed_default_onboard_voucher(org_id) when is_integer(org_id) do
+    existing =
+      Repo.one(
+        from(v in BlogEngine.Settings.Voucher,
+          where: v.organization_id == ^org_id and v.trigger_type == "onboard",
+          limit: 1
+        )
+      )
+
+    if is_nil(existing) do
+      create_voucher(%{
+        "code" => "ONBOARD-#{org_id}",
+        "amount" => 5.0,
+        "status" => "active",
+        "max_redemptions" => 999999,
+        "redemptions_count" => 0,
+        "remarks" => "Default Welcome Voucher Template",
+        "trigger_type" => "onboard",
+        "voucher_expiry_days" => 30,
+        "organization_id" => org_id
+      })
+    else
+      {:ok, existing}
+    end
   end
 
   def update_organization(model, params) do
@@ -909,7 +942,14 @@ defmodule BlogEngine.Settings do
           attrs
       end
 
-    User.changeset(%User{}, attrs) |> Repo.insert() |> IO.inspect()
+    case User.changeset(%User{}, attrs) |> Repo.insert() do
+      {:ok, user} = res ->
+        trigger_onboard_vouchers(user)
+        res
+
+      error ->
+        error
+    end
   end
 
   @doc """
@@ -965,7 +1005,11 @@ defmodule BlogEngine.Settings do
 
             case User.changeset(u, update_attrs)
                  |> Repo.update() do
-              {:ok, _} -> {:ok, :updated}
+              {:ok, updated_u} ->
+                if is_integer(org_id) and u.organization_id in [nil, 0] do
+                  trigger_onboard_vouchers(updated_u)
+                end
+                {:ok, :updated}
               {:error, cs} -> {:error, cs}
             end
           else
@@ -4994,6 +5038,106 @@ defmodule BlogEngine.Settings do
   end
 
   @doc """
+  Automatically issues personalized welcome voucher(s) to a newly onboarded user.
+  Triggered when an organization_user is created or first associated with an organization.
+  """
+  def trigger_onboard_vouchers(%User{} = user) do
+    org_id = user.organization_id
+
+    if is_integer(org_id) and org_id > 0 do
+      templates =
+        Repo.all(
+          from(v in Voucher,
+            where:
+              v.organization_id == ^org_id and
+                v.trigger_type == "onboard" and
+                v.status == "active",
+            order_by: [asc: v.id]
+          )
+        )
+
+      now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+      Enum.reduce(templates, [], fn template, acc ->
+        already_has_onboard =
+          Repo.one(
+            from(uv in UserVoucher,
+              join: v in assoc(uv, :voucher),
+              where:
+                uv.user_id == ^user.id and
+                  uv.organization_id == ^org_id and
+                  v.trigger_type == "onboard",
+              limit: 1
+            )
+          )
+
+        if already_has_onboard do
+          acc
+        else
+          expiry_days = template.voucher_expiry_days || 30
+          expires_at = NaiveDateTime.add(now, expiry_days * 86400, :second)
+          code = generate_unique_voucher_code(org_id, "WELCOME")
+
+          voucher_attrs = %{
+            "code" => code,
+            "amount" => template.amount,
+            "expires_at" => expires_at,
+            "status" => "active",
+            "max_redemptions" => 1,
+            "redemptions_count" => 0,
+            "trigger_type" => "onboard",
+            "voucher_expiry_days" => expiry_days,
+            "organization_id" => org_id,
+            "remarks" => "Welcome voucher for #{user.fullname || user.username || user.email}",
+            "image_url" => template.image_url
+          }
+
+          case create_voucher(voucher_attrs) do
+            {:ok, new_voucher} ->
+              uv_attrs = %{
+                user_id: user.id,
+                voucher_id: new_voucher.id,
+                organization_id: org_id,
+                status: "issued",
+                expires_at: expires_at
+              }
+
+              case %UserVoucher{} |> UserVoucher.changeset(uv_attrs) |> Repo.insert() do
+                {:ok, uv} ->
+                  [Repo.preload(uv, [:voucher, :user]) | acc]
+
+                _ ->
+                  acc
+              end
+
+            _ ->
+              acc
+          end
+        end
+      end)
+    else
+      []
+    end
+  end
+
+  def trigger_onboard_vouchers(_), do: []
+
+  defp generate_unique_voucher_code(org_id, prefix) do
+    suffix = :crypto.strong_rand_bytes(4) |> Base.encode16()
+    candidate = "#{prefix}-#{suffix}"
+
+    case Repo.one(
+           from(v in Voucher,
+             where: v.organization_id == ^org_id and v.code == ^candidate,
+             limit: 1
+           )
+         ) do
+      nil -> candidate
+      _ -> generate_unique_voucher_code(org_id, prefix)
+    end
+  end
+
+  @doc """
   Lists vouchers assigned to / redeemed by a user.
   """
   def list_user_vouchers_for_user(user_id, organization_id)
@@ -5038,6 +5182,7 @@ defmodule BlogEngine.Settings do
         remarks: (v && v.remarks) || "",
         image_url: (v && v.image_url) || nil,
         points_required: (v && v.points_required) || 0.0,
+        trigger_type: (v && v.trigger_type) || "regular",
         voucher:
           if v do
             %{
@@ -5048,6 +5193,8 @@ defmodule BlogEngine.Settings do
               image_url: v.image_url,
               points_required: v.points_required,
               status: v.status,
+              trigger_type: v.trigger_type,
+              voucher_expiry_days: v.voucher_expiry_days,
               expires_at: v.expires_at
             }
           else
@@ -5831,6 +5978,10 @@ defmodule BlogEngine.Settings do
       {:img_url, v} -> {:image_url, v}
       {"expires_at", v} -> {:expires_at, parse_naive_datetime(v)}
       {:expires_at, v} -> {:expires_at, parse_naive_datetime(v)}
+      {"trigger_type", v} -> {:trigger_type, if(is_binary(v), do: String.trim(v), else: to_string(v))}
+      {:trigger_type, v} -> {:trigger_type, if(is_binary(v), do: String.trim(v), else: to_string(v))}
+      {"voucher_expiry_days", v} -> {:voucher_expiry_days, to_integer_val(v, 30)}
+      {:voucher_expiry_days, v} -> {:voucher_expiry_days, to_integer_val(v, 30)}
       {k, v} when is_binary(k) -> {String.to_atom(k), v}
       {k, v} -> {k, v}
     end)
@@ -5838,4 +5989,16 @@ defmodule BlogEngine.Settings do
   end
 
   defp normalize_voucher_attrs(attrs), do: attrs
+
+  defp to_integer_val(v, default) do
+    case v do
+      i when is_integer(i) -> i
+      s when is_binary(s) ->
+        case Integer.parse(String.trim(s)) do
+          {val, _} -> val
+          _ -> default
+        end
+      _ -> default
+    end
+  end
 end

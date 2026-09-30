@@ -14,6 +14,8 @@ defmodule BlogEngine.Settings.Voucher do
     field :batch_no, :string
     field :remarks, :string
     field :image_url, :string
+    field :trigger_type, :string, default: "regular"
+    field :voucher_expiry_days, :integer, default: 30
     field :redeemed_at, :naive_datetime
 
     belongs_to :organization, BlogEngine.Settings.Organization
@@ -39,11 +41,14 @@ defmodule BlogEngine.Settings.Voucher do
       :batch_no,
       :remarks,
       :image_url,
+      :trigger_type,
+      :voucher_expiry_days,
       :organization_id,
       :redeemed_by_user_id,
       :redeemed_at
     ])
     |> validate_required([:code, :amount, :organization_id])
+    |> validate_inclusion(:trigger_type, ["regular", "onboard", "birthday"])
     |> unique_constraint(:code, name: :vouchers_code_organization_id_index)
   end
 end
