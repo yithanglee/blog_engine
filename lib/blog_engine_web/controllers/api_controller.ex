@@ -3372,9 +3372,14 @@ defmodule BlogEngineWeb.ApiController do
         else
           attrs =
             params
-            |> Map.take(["fullname", "username", "phone", "email", "password"])
+            |> Map.take(["fullname", "username", "phone", "email", "password", "dob"])
+            |> Enum.map(fn
+              {"dob", ""} -> {"dob", nil}
+              kv -> kv
+            end)
             |> Enum.reject(fn
               {"password", v} when v in [nil, ""] -> true
+              {"dob", _} -> false
               {_k, v} when v in [nil, ""] -> true
               _ -> false
             end)
