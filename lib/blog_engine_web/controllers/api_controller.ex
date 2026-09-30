@@ -3388,6 +3388,8 @@ defmodule BlogEngineWeb.ApiController do
           Settings.update_user(user, attrs)
           |> case do
             {:ok, updated_user} ->
+              Settings.trigger_birthday_voucher_for_user(updated_user)
+
               conn
               |> put_resp_content_type("application/json")
               |> send_resp(

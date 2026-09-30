@@ -67,7 +67,8 @@ config :blue_potion,
 
 config :blog_engine, BlogEngine.Scheduler,
   jobs: [
-    {"*/5 * * * *", {BlogEngine, :check_online, ["1"]}}
+    {"*/5 * * * *", {BlogEngine, :check_online, ["1"]}},
+    {"0 0 * * *", {BlogEngine.Settings, :trigger_birthday_vouchers, []}}
   ]
 
 # Application.get_env(:blog_engine, :cloridge)[:key]

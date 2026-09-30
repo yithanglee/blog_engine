@@ -67,6 +67,7 @@ defmodule BlogEngine.Settings do
     case Organization.changeset(%Organization{}, params) |> Repo.insert() do
       {:ok, org} = res ->
         seed_default_onboard_voucher(org.id)
+        seed_default_birthday_voucher(org.id)
         res
 
       error ->
@@ -92,6 +93,32 @@ defmodule BlogEngine.Settings do
         "redemptions_count" => 0,
         "remarks" => "Default Welcome Voucher Template",
         "trigger_type" => "onboard",
+        "voucher_expiry_days" => 30,
+        "organization_id" => org_id
+      })
+    else
+      {:ok, existing}
+    end
+  end
+
+  def seed_default_birthday_voucher(org_id) when is_integer(org_id) do
+    existing =
+      Repo.one(
+        from(v in BlogEngine.Settings.Voucher,
+          where: v.organization_id == ^org_id and v.trigger_type == "birthday",
+          limit: 1
+        )
+      )
+
+    if is_nil(existing) do
+      create_voucher(%{
+        "code" => "BDAY-#{org_id}",
+        "amount" => 10.0,
+        "status" => "active",
+        "max_redemptions" => 999999,
+        "redemptions_count" => 0,
+        "remarks" => "Default Birthday Gift Voucher Template",
+        "trigger_type" => "birthday",
         "voucher_expiry_days" => 30,
         "organization_id" => org_id
       })
@@ -5122,6 +5149,134 @@ defmodule BlogEngine.Settings do
 
   def trigger_onboard_vouchers(_), do: []
 
+  @doc """
+  Runs daily (e.g. via Quantum Scheduler) to issue birthday vouchers to all members
+  whose date of birth matches today.
+  """
+  def trigger_birthday_vouchers(date \\ Date.utc_today()) do
+    month = date.month
+    day = date.day
+
+    users =
+      Repo.all(
+        from(u in User,
+          where:
+            not is_nil(u.dob) and
+              not is_nil(u.organization_id) and
+              u.organization_id > 0 and
+              fragment("EXTRACT(MONTH FROM ?) = ?", u.dob, ^month) and
+              fragment("EXTRACT(DAY FROM ?) = ?", u.dob, ^day)
+        )
+      )
+
+    Enum.flat_map(users, fn user ->
+      trigger_birthday_voucher_for_user(user, date)
+    end)
+  end
+
+  @doc """
+  Issues birthday voucher to a specific user if today matches their DOB and they haven't received
+  a birthday voucher for the given calendar year yet.
+  """
+  def trigger_birthday_voucher_for_user(user, date \\ Date.utc_today())
+
+  def trigger_birthday_voucher_for_user(%User{} = user, date) do
+    org_id = user.organization_id
+
+    parsed_dob =
+      case user.dob do
+        %Date{} = d -> d
+        str when is_binary(str) ->
+          case Date.from_iso8601(str) do
+            {:ok, d} -> d
+            _ -> nil
+          end
+        _ -> nil
+      end
+
+    with true <- is_integer(org_id) and org_id > 0,
+         %Date{} = user_dob <- parsed_dob,
+         true <- user_dob.month == date.month and user_dob.day == date.day do
+      year = date.year
+
+      templates =
+        Repo.all(
+          from(v in Voucher,
+            where:
+              v.organization_id == ^org_id and
+                v.trigger_type == "birthday" and
+                v.status == "active",
+            order_by: [asc: v.id]
+          )
+        )
+
+      now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+      Enum.reduce(templates, [], fn template, acc ->
+        already_received_this_year =
+          Repo.one(
+            from(uv in UserVoucher,
+              join: v in assoc(uv, :voucher),
+              where:
+                uv.user_id == ^user.id and
+                  uv.organization_id == ^org_id and
+                  v.trigger_type == "birthday" and
+                  fragment("EXTRACT(YEAR FROM ?) = ?", uv.inserted_at, ^year),
+              limit: 1
+            )
+          )
+
+        if already_received_this_year do
+          acc
+        else
+          expiry_days = template.voucher_expiry_days || 30
+          expires_at = NaiveDateTime.add(now, expiry_days * 86400, :second)
+          code = generate_unique_voucher_code(org_id, "BDAY-#{year}")
+
+          voucher_attrs = %{
+            "code" => code,
+            "amount" => template.amount,
+            "expires_at" => expires_at,
+            "status" => "active",
+            "max_redemptions" => 1,
+            "redemptions_count" => 0,
+            "trigger_type" => "birthday",
+            "voucher_expiry_days" => expiry_days,
+            "organization_id" => org_id,
+            "remarks" => "Birthday gift for #{user.fullname || user.username || user.email}",
+            "image_url" => template.image_url
+          }
+
+          case create_voucher(voucher_attrs) do
+            {:ok, new_voucher} ->
+              uv_attrs = %{
+                user_id: user.id,
+                voucher_id: new_voucher.id,
+                organization_id: org_id,
+                status: "issued",
+                expires_at: expires_at
+              }
+
+              case %UserVoucher{} |> UserVoucher.changeset(uv_attrs) |> Repo.insert() do
+                {:ok, uv} ->
+                  [Repo.preload(uv, [:voucher, :user]) | acc]
+
+                _ ->
+                  acc
+              end
+
+            _ ->
+              acc
+          end
+        end
+      end)
+    else
+      _ -> []
+    end
+  end
+
+  def trigger_birthday_voucher_for_user(_, _), do: []
+
   defp generate_unique_voucher_code(org_id, prefix) do
     suffix = :crypto.strong_rand_bytes(4) |> Base.encode16()
     candidate = "#{prefix}-#{suffix}"
@@ -5142,6 +5297,11 @@ defmodule BlogEngine.Settings do
   """
   def list_user_vouchers_for_user(user_id, organization_id)
       when is_integer(user_id) and is_integer(organization_id) do
+    case get_user(user_id) do
+      %User{} = u -> trigger_birthday_voucher_for_user(u)
+      _ -> :ok
+    end
+
     now = NaiveDateTime.utc_now()
 
     query =
