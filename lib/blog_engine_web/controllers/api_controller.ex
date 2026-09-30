@@ -3397,10 +3397,26 @@ defmodule BlogEngineWeb.ApiController do
                 Jason.encode!(%{status: "ok", user: BluePotion.sanitize_struct(updated_user)})
               )
 
+            {:error, %Ecto.Changeset{} = changeset} ->
+              error_msg =
+                Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)
+                |> Enum.map(fn {k, v} -> "#{k}: #{Enum.join(v, ", ")}" end)
+                |> Enum.join("; ")
+
+              conn
+              |> put_resp_content_type("application/json")
+              |> send_resp(
+                400,
+                Jason.encode!(%{status: "error", reason: error_msg, message: error_msg})
+              )
+
             {:error, reason} ->
               conn
               |> put_resp_content_type("application/json")
-              |> send_resp(400, Jason.encode!(%{status: "error", reason: inspect(reason)}))
+              |> send_resp(
+                400,
+                Jason.encode!(%{status: "error", reason: inspect(reason), message: inspect(reason)})
+              )
           end
         end
 

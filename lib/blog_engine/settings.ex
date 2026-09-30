@@ -1107,8 +1107,11 @@ defmodule BlogEngine.Settings do
 
         {:ok, u}
 
-      {:error, cg} ->
-        {:error, cg}
+      {:error, _step, failed_val, _changes} ->
+        {:error, failed_val}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
