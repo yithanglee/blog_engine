@@ -33,3 +33,4 @@ blog_engine-*.tar
 .env.*
 .agents/
 scripts/
+.dyad/

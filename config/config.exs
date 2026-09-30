@@ -75,13 +75,11 @@ config :blog_engine, :cloridge,
   key: System.get_env("CLORIDGE_KEY"),
   secret: System.get_env("CLORIDGE_SECRET")
 
-# Import environment specific config. This must remain at the bottom
-# of this file so it overrides the configuration defined above.
-import_config "#{Mix.env()}.exs"
-
 config :sentry,
-  dsn:
-    "https://40007b03bce690dd202872a0f1f99ae8@o4509038537867264.ingest.us.sentry.io/4509038546911232",
   environment_name: Mix.env(),
   enable_source_code_context: true,
   root_source_code_paths: [File.cwd!()]
+
+# Import environment specific config. This must remain at the bottom
+# of this file so it overrides the configuration defined above.
+import_config "#{Mix.env()}.exs"

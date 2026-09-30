@@ -99,3 +99,8 @@ config :blog_engine, :revenue_monster,
   client_secret: System.get_env("RM_CLIENT_SECRET_PROD"),
   private_key: System.get_env("RM_CLIENT_PRIVATE_KEY_PROD"),
   cert_location: "/priv/cert/private_key_prod.pem"
+
+config :sentry,
+  dsn:
+    System.get_env("SENTRY_DSN") ||
+      "https://b82c39a6a84b4de785612a31ec2b54aa@glitchtip.jimatbiz.com/10"

@@ -43,6 +43,7 @@ defmodule BlogEngineWeb.Router do
         "http://localhost:8080",
         "http://localhost:8081",
         "http://localhost:32104",
+        "http://localhost:32106",
         "http://localhost:42104",
         "http://localhost:42106",
         "https://701e-2405-3800-91a-cd6d-344b-51a2-f232-2356.ngrok-free.app",

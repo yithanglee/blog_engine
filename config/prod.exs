@@ -55,6 +55,14 @@ config :logger, level: :debug
 #
 # Check `Plug.SSL` for all available options in `force_ssl`.
 
+config :sentry,
+  dsn:
+    System.get_env("SENTRY_DSN") ||
+      "https://b82c39a6a84b4de785612a31ec2b54aa@glitchtip.jimatbiz.com/10",
+  environment_name: :prod,
+  enable_source_code_context: true,
+  root_source_code_paths: [File.cwd!()]
+
 # Finally import the config/prod.secret.exs which loads secrets
 # and configuration from environment variables.
 import_config "prod.secret.exs"
