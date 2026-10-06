@@ -981,7 +981,7 @@ defmodule Razer do
       {"CustEmail", user.email},
       {"CustContact", user.phone},
       {"CustDesc", user.username},
-      {"NotificationURL", "#{server_url}api/notification/razer"},
+      {"NotificationURL", "#{notification_base(server_url)}api/notification/razer"},
       {"ReturnURL", "#{server_url}thank_you"},
       {"CallbackURL", "#{server_url}api/payment/razer"},
       {"Signature", generate_signature(txn_amount, reference_no)}
@@ -1019,6 +1019,15 @@ defmodule Razer do
         # send_resp(conn, 500, "Request failed: #{reason}")
         reason
         %{status: :error, reason: reason}
+    end
+  end
+
+  # Public base of webhook_edge, including the trailing slash.
+  # Falls back to this app's URL when WEBHOOK_EDGE_URL is unset.
+  defp notification_base(server_url) do
+    case Application.get_env(:blog_engine, :webhook_edge_url) do
+      url when is_binary(url) and url != "" -> url
+      _ -> server_url
     end
   end
 

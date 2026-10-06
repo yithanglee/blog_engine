@@ -1,22 +1,43 @@
 defmodule BlogEngine.Queue do
+  @moduledoc """
+  Consumes ElasticMQ / SQS.
+
+  Fiuu notifications arrive as envelopes published by WebhookEdge:
+
+      %{"source" => "fiuu", "payload" => %{...callback fields...}, "received_at" => ...}
+
+  Other jobs still use a top-level `"scope"` (`register`, `upgrade`).
+  """
+
   use Broadway
 
   alias Broadway.Message
 
-  def start_link(_opts) do
+  def child_spec(opts) do
+    %{
+      id: Keyword.get(opts, :name, __MODULE__),
+      start: {__MODULE__, :start_link, [opts]}
+    }
+  end
+
+  def start_link(opts) do
+    sqs = Application.get_env(:blog_engine, :sqs, [])
+
     Broadway.start_link(__MODULE__,
-      name: __MODULE__,
+      name: Keyword.get(opts, :name, __MODULE__),
       producer: [
         module:
           {BroadwaySQS.Producer,
-           queue_url: "http://localhost:9324/queue/queue1",
+           queue_url:
+             Keyword.get(opts, :queue_url) || sqs[:queue_url] ||
+               "http://localhost:9324/queue/queue1",
            config: [
-             access_key_id: "x",
-             secret_access_key: "x",
-             host: "localhost",
-             port: "9324",
-             scheme: "http://",
-             region: "elasticmq"
+             access_key_id: sqs[:access_key_id] || "x",
+             secret_access_key: sqs[:secret_access_key] || "x",
+             host: Keyword.get(opts, :host) || sqs[:host] || "localhost",
+             port: Keyword.get(opts, :port) || sqs[:port] || "9324",
+             scheme: sqs[:scheme] || "http://",
+             region: sqs[:region] || "elasticmq"
            ]}
       ],
       processors: [
@@ -30,7 +51,13 @@ defmodule BlogEngine.Queue do
 
   @impl true
   def handle_message(_, %Message{data: data} = message, _) do
-    case message.data |> Jason.decode() |> IO.inspect() do
+    case Jason.decode(data) do
+      {:ok, %{"source" => source, "payload" => payload}}
+      when source in ["fiuu", "razer"] and is_map(payload) ->
+        BlogEngine.FiuuNotification.process(payload)
+
+        Message.update_data(message, fn _data -> "processed!" end)
+
       {:ok, processed} ->
         if "scope" in Map.keys(processed) do
           IO.inspect(processed)
@@ -52,24 +79,17 @@ defmodule BlogEngine.Queue do
                 processed["form_drp"]
               )
 
-            # need to get the device name and its current hwaddrss
             _ ->
               nil
           end
 
-          # process the data here
-          message
-          |> Message.update_data(fn _data ->
-            "processed!"
-          end)
+          Message.update_data(message, fn _data -> "processed!" end)
         else
-          message
-          |> Message.update_data(fn _data -> "scope: not present" end)
+          Message.update_data(message, fn _data -> "scope: not present" end)
         end
 
       {:error, _message} ->
-        message
-        |> Message.update_data(fn _data -> "scope: not present" end)
+        Message.update_data(message, fn _data -> "scope: not present" end)
     end
   end
 

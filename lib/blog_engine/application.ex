@@ -16,7 +16,6 @@ defmodule BlogEngine.Application do
     children =
       fcm_goth_children ++
         [
-          # {BlogEngine.Queue, []},
           BlogEngine.Repo,
           # Start the Telemetry supervisor
           BlogEngineWeb.Telemetry,
@@ -58,6 +57,23 @@ defmodule BlogEngine.Application do
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
+    children =
+      if Application.get_env(:blog_engine, :start_queue, true) do
+        sqs = Application.get_env(:blog_engine, :sqs, [])
+
+        children ++
+          [
+            {BlogEngine.Queue, []},
+            {BlogEngine.Queue,
+             name: BlogEngine.Queue2,
+             queue_url: sqs[:queue_url2],
+             host: sqs[:host2],
+             port: sqs[:port2]}
+          ]
+      else
+        children
+      end
+
     opts = [strategy: :one_for_one, name: BlogEngine.Supervisor]
     Supervisor.start_link(children, opts)
   end

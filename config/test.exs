@@ -8,3 +8,5 @@ config :blog_engine, BlogEngineWeb.Endpoint,
 
 # Print only warnings and errors during test
 config :logger, level: :warn
+
+config :blog_engine, :start_queue, false

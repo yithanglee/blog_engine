@@ -76,6 +76,24 @@ config :blog_engine, :cloridge,
   key: System.get_env("CLORIDGE_KEY"),
   secret: System.get_env("CLORIDGE_SECRET")
 
+# Same ElasticMQ queue WebhookEdge publishes to (SQS_QUEUE_URL).
+config :blog_engine, :sqs,
+  queue_url: System.get_env("SQS_QUEUE_URL") || "http://localhost:9324/queue/queue1",
+  queue_url2: System.get_env("SQS_QUEUE_URL2") || "http://10.8.0.2:9324/queue/queue2",
+  host2: System.get_env("SQS_HOST2") || "10.8.0.2",
+  port2: System.get_env("SQS_PORT2") || "9324",
+  host: System.get_env("SQS_HOST") || "localhost",
+  port: System.get_env("SQS_PORT") || "9324",
+  scheme: System.get_env("SQS_SCHEME") || "http://",
+  region: System.get_env("AWS_REGION") || "elasticmq",
+  access_key_id: System.get_env("AWS_ACCESS_KEY_ID") || "x",
+  secret_access_key: System.get_env("AWS_SECRET_ACCESS_KEY") || "x"
+
+config :blog_engine, :start_queue, true
+
+# Trailing slash required. Example: http://localhost:4010/
+config :blog_engine, :webhook_edge_url, System.get_env("WEBHOOK_EDGE_URL")
+
 config :sentry,
   environment_name: Mix.env(),
   enable_source_code_context: true,
