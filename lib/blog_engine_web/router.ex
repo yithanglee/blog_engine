@@ -46,6 +46,7 @@ defmodule BlogEngineWeb.Router do
         "http://localhost:32106",
         "http://localhost:42104",
         "http://localhost:42106",
+        "https://djtech-admin.yithanglee.workers.dev",
         "https://701e-2405-3800-91a-cd6d-344b-51a2-f232-2356.ngrok-free.app",
         "http://10.0.2.2:8080"
       ],
@@ -73,7 +74,8 @@ defmodule BlogEngineWeb.Router do
         "http://localhost:5173",
         "http://localhost:5174",
         "http://localhost:2578",
-        "http://localhost:3000"
+        "http://localhost:3000",
+        "https://djtech-admin.yithanglee.workers.dev"
       ]
 
     plug(BlogEngine.ApiAuthorization)

@@ -3023,13 +3023,13 @@ defmodule BlogEngine.Settings do
       end
 
     qparams = ["complete"]
-    [y, m, d] = Date.utc_today() |> Date.to_string() |> String.split("-")
+    [y, m, _d] = Date.utc_today() |> Date.to_string() |> String.split("-")
     year_month = Map.get(params, "year_month", "#{y}-#{m}")
 
     organization_q =
       if organization_id != nil do
         """
-        and d.organization_id = $2
+        where target.organization_id = $2
         """
       else
         """
@@ -3038,34 +3038,27 @@ defmodule BlogEngine.Settings do
 
     qparams = qparams |> List.insert_at(Enum.count(qparams), organization_id)
 
-    # Get the current number of days in the current month
-    days_in_month_query = """
-      SELECT EXTRACT(DAY FROM (DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 MONTH' - INTERVAL '1 DAY'))::INT;
-    """
-
-    {:ok, %Postgrex.Result{rows: [[days_in_month]]}} = Repo.query(days_in_month_query, [])
-
     # Dynamically create FILTER clauses for each day of the current month
     day_filters =
       Enum.map(1..31, fn day ->
         padded_day = String.pad_leading(Integer.to_string(day), 2, "0")
 
         """
-        sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{padded_day}') AS day_#{day},
-        sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{padded_day}' AND l.sales_type = 'offline') AS day_#{day}_online_sum,
-        sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{padded_day}' AND l.sales_type = 'cash') AS day_#{day}_offline_sum,
-        sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{padded_day}' AND l.sales_type = 'topup') AS day_#{day}_topup_sum
+        COALESCE(sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{padded_day}'), 0) AS day_#{day},
+        COALESCE(sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{padded_day}' AND l.sales_type = 'offline'), 0) AS day_#{day}_online_sum,
+        COALESCE(sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{padded_day}' AND l.sales_type = 'cash'), 0) AS day_#{day}_offline_sum,
+        COALESCE(sum(l.amount) FILTER(WHERE to_char(l.inserted_at, 'YYYY-MM-DD') = '#{year_month}' || '-#{padded_day}' AND l.sales_type = 'topup'), 0) AS day_#{day}_topup_sum
         """
       end)
       |> Enum.join(",\n")
 
     query3 = """
     select
-        to_char(l.inserted_at, 'YYYY-MM') as year,
+        '#{year_month}' as year,
         d.short_name as device,
         d.name as device_long,
         count(l.id) as transactions,
-        sum(l.amount) as amount,
+        COALESCE(sum(l.amount), 0) as amount,
         count(l.id) FILTER (WHERE l.sales_type = 'offline') as sales_online,
         count(l.id) FILTER (WHERE l.sales_type = 'cash') as sales_offline,
         count(l.id) FILTER (WHERE l.sales_type = 'topup') as sales_topup,
@@ -3073,18 +3066,35 @@ defmodule BlogEngine.Settings do
         COALESCE(oz.name, 'n/a') as organization,
         #{day_filters}
       from
-        sales l
-        left join devices d on d.id = l.device_id
-        left join outlets o on o.id = l.outlet_id
-        full join organizations oz on oz.id = d.organization_id
-      where
-        l.status = $1
-        and to_char(l.inserted_at, 'YYYY-MM') = '#{year_month}'
-        #{organization_q}
+        (
+          SELECT DISTINCT d.id as device_id, d.outlet_id, d.organization_id
+          FROM devices d
+          WHERE d.outlet_id IS NOT NULL
+          UNION
+          SELECT DISTINCT NULL::bigint as device_id, o.id as outlet_id, o.organization_id
+          FROM outlets o
+          WHERE o.id NOT IN (SELECT DISTINCT outlet_id FROM devices WHERE outlet_id IS NOT NULL)
+          UNION
+          SELECT DISTINCT l.device_id, l.outlet_id, COALESCE(d.organization_id, o.organization_id)
+          FROM sales l
+          LEFT JOIN devices d ON d.id = l.device_id
+          LEFT JOIN outlets o ON o.id = l.outlet_id
+          WHERE l.status = $1 AND to_char(l.inserted_at, 'YYYY-MM') = '#{year_month}'
+        ) target
+        LEFT JOIN devices d ON d.id = target.device_id
+        JOIN outlets o ON o.id = target.outlet_id
+        LEFT JOIN organizations oz ON oz.id = target.organization_id
+        LEFT JOIN sales l ON (
+          (target.device_id IS NOT NULL AND l.device_id = target.device_id)
+          OR (target.device_id IS NULL AND l.device_id IS NULL AND l.outlet_id = target.outlet_id)
+        )
+        AND l.status = $1
+        AND to_char(l.inserted_at, 'YYYY-MM') = '#{year_month}'
+      #{organization_q}
       group by
-        d.name, d.short_name, o.name, oz.name, to_char(l.inserted_at, 'YYYY-MM')
+        d.name, d.short_name, o.name, oz.name
       order by
-        to_char(l.inserted_at, 'YYYY-MM') desc;
+        o.name asc, d.name asc;
     """
 
     type = ""
@@ -3095,13 +3105,12 @@ defmodule BlogEngine.Settings do
           query3
       end
 
-    {:ok, %Postgrex.Result{columns: columns, rows: rows} = res} =
+    {:ok, %Postgrex.Result{columns: columns, rows: rows} = _res} =
       Repo.query(query, qparams |> Enum.reject(&(&1 == nil)))
 
     for row <- rows do
       Enum.zip(columns |> Enum.map(&(&1 |> String.to_atom())), row) |> Enum.into(%{})
     end
-    |> IO.inspect()
   end
 
   def monthly_outlet_trx_only_rp(params \\ %{}) do

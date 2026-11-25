@@ -16,7 +16,7 @@ use Mix.Config
 config :blog_engine, BlogEngineWeb.Endpoint,
   url: [host: "blog.damienslab.com", port: 2579],
   http: [port: 2579],
-  check_origin: ["https://svt_blog.damienslab.com"]
+  check_origin: ["https://svt_blog.damienslab.com", "https://djtech-admin.yithanglee.workers.dev", "http://localhost:5173"]
 
 # Do not print debug messages in production 
 config :logger, level: :debug
